@@ -76,6 +76,61 @@ mod app {
     fn init(cx: init::Context) -> (Shared, Local) {
         let p = cx.device;
 
+        // Enable DMA 2 clock
+        p.RCC.ahb1enr.write(|w| w.dma2en().enabled());
+        /*
+            /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+             */
+            hadc1.Instance = ADC1;
+            hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
+            hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+            hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+            hadc1.Init.ContinuousConvMode = DISABLE;
+            hadc1.Init.DiscontinuousConvMode = DISABLE;
+            hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+            hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+            hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+            hadc1.Init.NbrOfConversion = 1;
+            hadc1.Init.DMAContinuousRequests = DISABLE;
+            hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+            if (HAL_ADC_Init(&hadc1) != HAL_OK)
+            {
+                Error_Handler();
+            }
+
+        */
+        // DIV2 clock prescaler on all ADCs
+        p.ADC_COMMON.ccr.write(|w| w.adcpre().div2());
+        // Disable scan mode, set 12-bit resolution
+        p.ADC1.cr1.write(|w| w.scan().disabled().res().twelve_bit());
+        // Select external trigger TIM1 CC1 on rising edge
+        p.ADC1
+            .cr2
+            .write(|w| w.align().right().extsel().tim1cc1().exten().rising_edge());
+        // enable continuous conversion mode
+        p.ADC1.cr2.write(|w| w.cont().continuous());
+        // disable discontinuos mode
+        p.ADC1.cr1.write(|w| w.discen().disabled());
+        // Set number of conversions to (1)?
+        p.ADC1.sqr1.write(|w| unsafe { w.bits(1) });
+        // Enable DMA continuous request
+        p.ADC1
+            .cr2
+            .write(|w| w.dds().continuous().dma().enabled().eocs().each_sequence());
+
+        /*
+            /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.*/
+            sConfig.Channel = ADC_CHANNEL_3;
+            sConfig.Rank = ADC_REGULAR_RANK_1;
+            sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+            if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+            {
+            Error_Handler();
+            }
+        */
+        p.ADC1.smpr2.write(|w| w.smp0().cycles3());
+        p.ADC1.sqr3.write(|w| unsafe { w.sq3().bits(0x00000001) });
+
         let mut rcc = p.RCC.constrain();
         // Setup clocks
         let clocks = {
@@ -134,10 +189,6 @@ mod app {
         };
 
         // Setup ADC
-        let adc1 = stm32f7xx_hal::adc::Adc::adc1(p.ADC1, &mut rcc.apb2, &clocks, 0, true);
-        let dma2 = stm32f7xx_hal::dma::DMA::new(p.DMA2);
-        let adc1_stream = dma2.streams.stream0;
-        let dma2 = dma2.handle.enable(&mut rcc.ahb1);
 
         // Setup Ethernet
         let Parts {
@@ -485,6 +536,11 @@ mod app {
             // poll, would be an optimization for later to go to sleep longer
             Systick::delay(delay_millis.millis()).await;
         }
+    }
+
+    #[task(binds = DMA2_STREAM0, priority = 3)]
+    fn on_dma2_stream0(mut cx: on_dma2_stream0::Context) {
+        defmt::error!("DMA2_STREAM0!");
     }
 
     /// Handle the interrupt of the ethernet peripheral

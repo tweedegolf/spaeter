@@ -45,14 +45,21 @@ defmt::timestamp!("{=u64:iso8601ms}", {
 
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
+    use defmt::Debug2Format;
     use smoltcp::storage::PacketBuffer;
     use stm32f7xx_hal::{
         adc::Adc,
+        gpio::Alternate,
         pac::{self, ADC1},
     };
 
     use super::*;
     use crate::port::TimerName;
+
+    const DMA_CHUNK_NUM_CONVERSIONS: u16 = 1024;
+    const DMA_CHUNK_SIZE: usize = 32;
+    static mut ADC_CONVERSION_DATA: [[u16; DMA_CHUNK_NUM_CONVERSIONS as usize]; DMA_CHUNK_SIZE] =
+        [[0; DMA_CHUNK_NUM_CONVERSIONS as usize]; DMA_CHUNK_SIZE];
 
     #[shared]
     struct Shared {
@@ -102,6 +109,8 @@ mod app {
             let gpioc = p.GPIOC.split();
             let gpiog = p.GPIOG.split();
 
+            let _ = gpioa.pa3.into_analog();
+
             let led_pin = gpiob.pb7.into_push_pull_output();
             let pps = gpiob.pb5.into_push_pull_output();
 
@@ -139,11 +148,6 @@ mod app {
         defmt::println!("Going to do scary stuff now");
         // Setup ADC1 and DMA2
         {
-            const DMA_CHUNK_NUM_CONVERSIONS: u16 = 1024;
-            const DMA_CHUNK_SIZE: usize = 32;
-            static mut ADC_CONVERSION_DATA: [[u16; DMA_CHUNK_NUM_CONVERSIONS as usize];
-                DMA_CHUNK_SIZE] = [[0; DMA_CHUNK_NUM_CONVERSIONS as usize]; DMA_CHUNK_SIZE];
-
             let p = unsafe { pac::Peripherals::steal() };
 
             /*
@@ -163,6 +167,9 @@ mod app {
                     // Enable Double-buffer mode
                     .dbm()
                     .enabled()
+                    // Disable circular mode
+                    .circ()
+                    .disabled()
                     // Set data size to 16 bits at memory side
                     .msize()
                     .bits16()
@@ -231,9 +238,7 @@ mod app {
             p.RCC.apb2rstr.modify(|_, w| w.adcrst().clear_bit());
 
             // Setup ADC1 for single conversion mode
-            p.ADC1
-                .cr2
-                .modify(|_, w| w.cont().clear_bit().swstart().clear_bit());
+            p.ADC1.cr2.modify(|_, w| w.cont().single());
             p.ADC1
                 .cr1
                 .modify(|_, w| w.scan().clear_bit().discen().clear_bit());
@@ -241,16 +246,21 @@ mod app {
             // Setup ADC1 for external triggering by TIM2 TRGO
             p.ADC1
                 .cr2
-                .modify(|_, w| w.exten().rising_edge().extsel().tim2trgo());
+                .modify(|_, w| unsafe { w.exten().rising_edge().extsel().bits(0b1011) });
 
             // Setup ADC1 resolution to 12 bit
             p.ADC1.cr1.modify(|_, w| w.res().bits(0b00));
 
             // Enable DMA on ADC1
-            p.ADC1.cr2.modify(|_, w| w.dma().enabled());
+            p.ADC1.cr2.modify(|_, w| w.dma().enabled().dds().continuous());
 
             // Enable ADC end-of-conversion interrupt
-            p.ADC1.cr1.modify(|_, w| w.eocie().enabled());
+            p.ADC1
+                .cr1
+                .modify(|_, w| w.eocie().enabled().ovrie().enabled());
+
+            // Use PA3 as input
+            p.ADC1.sqr3.modify(|_, w| unsafe { w.sq1().bits(3) });
 
             // Power up ADC1
             p.ADC1.cr2.modify(|_, w| w.adon().enabled());
@@ -260,7 +270,7 @@ mod app {
             */
             // TIM2 is on APB1
             let tim2_freq = clocks.timclk1();
-            const SAMPLE_FREQ_HZ: u32 = 1;
+            const SAMPLE_FREQ_HZ: u32 = 100;
 
             p.TIM2.cr2.modify(|_, w| w.mms().update());
             p.TIM2
@@ -524,7 +534,19 @@ mod app {
     /// running
     #[task(priority = 0)]
     async fn blinky(_cx: blinky::Context, mut led: Pin<'B', 7, Output>) {
+        
         loop {
+            let dma2 = unsafe { &*pac::DMA2::ptr() };
+            let lisr = dma2.lisr.read().bits();
+            let cfg = dma2.st[0].cr.read().bits();
+            let ndtr = dma2.st[0].ndtr.read().bits();
+            defmt::println!(
+                "cfg={=u32:032b}\tndtr={=u32}\tlisr={=u32:032b}",
+                cfg,
+                ndtr,
+                lisr
+            );
+
             Systick::delay(500u64.millis()).await;
             led.set_high();
             Systick::delay(500u64.millis()).await;
@@ -612,23 +634,41 @@ mod app {
 
     #[task(binds = DMA2_STREAM0, priority = 1)]
     fn on_dma2_stream0(mut cx: on_dma2_stream0::Context) {
-        defmt::println!("DMA2_STREAM0!");
+        let dma2 = unsafe { &*pac::DMA2::ptr() };
+        let lisr = dma2.lisr.read().bits();
+        dma2.lifcr.write(|w| unsafe { w.bits(lisr) });
 
+        let cfg = dma2.st[0].cr.read().bits();
+        let ndtr = dma2.st[0].ndtr.read().bits();
+        defmt::println!(
+            "cfg={=u32:032b}\tndtr={=u32}\tlisr={=u32:032b}",
+            cfg,
+            ndtr,
+            lisr
+        );
+
+
+        let datum = unsafe { &ADC_CONVERSION_DATA[0][..16] };
+        defmt::println!("DMA2_STREAM0! {:?}", datum);
     }
 
     #[task(binds = TIM2, priority = 2)]
     fn on_tim2_update(mut cx: on_tim2_update::Context) {
-        let tim2 = unsafe {&* pac::TIM2::ptr()};
+        let tim2 = unsafe { &*pac::TIM2::ptr() };
         tim2.sr.modify(|_, w| w.uif().clear());
-        defmt::println!("TIM2!");
+        // defmt::println!("TIM2!");
     }
 
     #[task(binds = ADC, priority = 2)]
     fn on_adc1_conversion(mut cx: on_adc1_conversion::Context) {
-        let adc1 = unsafe { &* pac::ADC1::ptr()};
+        let adc1 = unsafe { &*pac::ADC1::ptr() };
         adc1.sr.modify(|_, w| w.eoc().not_complete());
 
-        defmt::println!("ADC!");
+        let overrun = adc1.sr.read().ovr().bit_is_set();
+        if overrun {
+            defmt::println!("ADC! Overrun: {}", overrun);
+            adc1.sr.modify(|_, w| w.ovr().clear_bit());
+        }
     }
 
     /// Handle the interrupt of the ethernet peripheral

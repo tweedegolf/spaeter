@@ -62,11 +62,7 @@ mod app {
     }
 
     #[local]
-    struct Local {
-        adc1: Adc<ADC1>,
-        adc1_buf: [u8; 16],
-        adc1_dma_stream: stm32f7xx_hal::dma::Stream0<pac::DMA2>,
-    }
+    struct Local {}
 
     #[init(local = [
         dma_resources: DmaResources = DmaResources::new(),
@@ -76,60 +72,12 @@ mod app {
     fn init(cx: init::Context) -> (Shared, Local) {
         let p = cx.device;
 
-        // Enable DMA 2 clock
-        p.RCC.ahb1enr.write(|w| w.dma2en().enabled());
-        /*
-            /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
-             */
-            hadc1.Instance = ADC1;
-            hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
-            hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-            hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-            hadc1.Init.ContinuousConvMode = DISABLE;
-            hadc1.Init.DiscontinuousConvMode = DISABLE;
-            hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-            hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-            hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-            hadc1.Init.NbrOfConversion = 1;
-            hadc1.Init.DMAContinuousRequests = DISABLE;
-            hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-            if (HAL_ADC_Init(&hadc1) != HAL_OK)
-            {
-                Error_Handler();
-            }
+        // Enable TIM2, ADC1 and DMA2 clocks
+        p.RCC.apb1enr.modify(|_, w| w.tim2en().enabled());
+        p.RCC.apb2enr.modify(|_, w| w.adc1en().enabled());
+        p.RCC.ahb1enr.modify(|_, w| w.dma2en().enabled());
 
-        */
-        // DIV2 clock prescaler on all ADCs
-        p.ADC_COMMON.ccr.write(|w| w.adcpre().div2());
-        // Disable scan mode, set 12-bit resolution
-        p.ADC1.cr1.write(|w| w.scan().disabled().res().twelve_bit());
-        // Select external trigger TIM1 CC1 on rising edge
-        p.ADC1
-            .cr2
-            .write(|w| w.align().right().extsel().tim1cc1().exten().rising_edge());
-        // enable continuous conversion mode
-        p.ADC1.cr2.write(|w| w.cont().continuous());
-        // disable discontinuos mode
-        p.ADC1.cr1.write(|w| w.discen().disabled());
-        // Set number of conversions to (1)?
-        p.ADC1.sqr1.write(|w| unsafe { w.bits(1) });
-        // Enable DMA continuous request
-        p.ADC1
-            .cr2
-            .write(|w| w.dds().continuous().dma().enabled().eocs().each_sequence());
-
-        /*
-            /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.*/
-            sConfig.Channel = ADC_CHANNEL_3;
-            sConfig.Rank = ADC_REGULAR_RANK_1;
-            sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
-            if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-            {
-            Error_Handler();
-            }
-        */
-        p.ADC1.smpr2.write(|w| w.smp0().cycles3());
-        p.ADC1.sqr3.write(|w| unsafe { w.sq3().bits(0x00000001) });
+        defmt::println!("HELLO!!O!O!");
 
         let mut rcc = p.RCC.constrain();
         // Setup clocks
@@ -188,7 +136,144 @@ mod app {
             (led_pin, pps, eth_pins, mdio, mdc)
         };
 
-        // Setup ADC
+        defmt::println!("Going to do scary stuff now");
+        // Setup ADC1 and DMA2
+        {
+            const DMA_CHUNK_NUM_CONVERSIONS: u16 = 1024;
+            const DMA_CHUNK_SIZE: usize = 32;
+            static mut ADC_CONVERSION_DATA: [[u16; DMA_CHUNK_NUM_CONVERSIONS as usize];
+                DMA_CHUNK_SIZE] = [[0; DMA_CHUNK_NUM_CONVERSIONS as usize]; DMA_CHUNK_SIZE];
+
+            let p = unsafe { pac::Peripherals::steal() };
+
+            /*
+               Configure DMA2 Stream 0 to read 16-bit conversions from ADC1
+               and write them into ADC_CONVERSION_DATA
+               in double-buffer mode
+            */
+
+            // Disable DMA2 Stream 0
+            p.DMA2.st[0].cr.modify(|_, w| w.en().disabled());
+
+            // Choose channel 0 for DMA2 Stream 0
+            p.DMA2.st[0].cr.modify(|_, w| {
+                // Select channel 0 (ADC1)
+                w.chsel()
+                    .bits(0)
+                    // Enable Double-buffer mode
+                    .dbm()
+                    .enabled()
+                    // Set data size to 16 bits at memory side
+                    .msize()
+                    .bits16()
+                    // Set data size to 16 bits at peripheral side
+                    .psize()
+                    .bits16()
+                    // Increment memory pointer after each read
+                    .minc()
+                    .incremented()
+                    // Do not increment peripheral data pointer
+                    .pinc()
+                    .fixed()
+                    // Write from peripheral to memory
+                    .dir()
+                    .peripheral_to_memory()
+                    // DMA controls when transfer ends (which is never due to circular mode)
+                    .pfctrl()
+                    .dma()
+                    // Enable Transfer Complete Interrupt
+                    .tcie()
+                    .enabled()
+                    // Enable Transfer Error Interrupt
+                    .teie()
+                    .enabled()
+                    // Enable Direct Mode Error Interrupt
+                    .dmeie()
+                    .enabled()
+                    // Select Memory 0 to start
+                    .ct()
+                    .memory0()
+            });
+
+            // Set buffer size
+            p.DMA2.st[0]
+                .ndtr
+                .modify(|_, w| w.ndt().bits(DMA_CHUNK_NUM_CONVERSIONS));
+
+            // Set peripheral address to ADC1 data register
+            p.DMA2.st[0]
+                .par
+                .write(|w| unsafe { w.pa().bits(p.ADC1.dr.as_ptr() as u32) });
+
+            // Point DMA Memory 0 to first chunk of ADC_CONVERSION_DATA
+            p.DMA2.st[0]
+                .m0ar
+                .write(|w| unsafe { w.m0a().bits(ADC_CONVERSION_DATA[0].as_ptr() as u32) });
+            // Point DMA Memory 1 to second chunk of ADC_CONVERSION_DATA
+            p.DMA2.st[0]
+                .m1ar
+                .write(|w| unsafe { w.m1a().bits(ADC_CONVERSION_DATA[1].as_ptr() as u32) });
+
+            // Enable DMA2 Stream 0
+            p.DMA2.st[0].cr.modify(|_, w| w.en().enabled());
+
+            /*
+               Configure ADC1 to 12-bits resolution in
+               single conversion mode and to be triggered externally from TIM2 TRGO
+               and read out using DMA
+            */
+
+            // Power down ADC1
+            p.ADC1.cr2.modify(|_, w| w.adon().clear_bit());
+
+            // Reset ADC1
+            p.RCC.apb2rstr.modify(|_, w| w.adcrst().set_bit());
+            p.RCC.apb2rstr.modify(|_, w| w.adcrst().clear_bit());
+
+            // Setup ADC1 for single conversion mode
+            p.ADC1
+                .cr2
+                .modify(|_, w| w.cont().clear_bit().swstart().clear_bit());
+            p.ADC1
+                .cr1
+                .modify(|_, w| w.scan().clear_bit().discen().clear_bit());
+
+            // Setup ADC1 for external triggering by TIM2 TRGO
+            p.ADC1
+                .cr2
+                .modify(|_, w| w.exten().rising_edge().extsel().tim2trgo());
+
+            // Setup ADC1 resolution to 12 bit
+            p.ADC1.cr1.modify(|_, w| w.res().bits(0b00));
+
+            // Enable DMA on ADC1
+            p.ADC1.cr2.modify(|_, w| w.dma().enabled());
+
+            // Enable ADC end-of-conversion interrupt
+            p.ADC1.cr1.modify(|_, w| w.eocie().enabled());
+
+            // Power up ADC1
+            p.ADC1.cr2.modify(|_, w| w.adon().enabled());
+
+            /*
+                Setup TIM2 to trigger ADC1 using TRGO on update event generation
+            */
+            // TIM2 is on APB1
+            let tim2_freq = clocks.timclk1();
+            const SAMPLE_FREQ_HZ: u32 = 1;
+
+            p.TIM2.cr2.modify(|_, w| w.mms().update());
+            p.TIM2
+                .arr
+                .write(|w| w.arr().bits(tim2_freq.to_Hz() / SAMPLE_FREQ_HZ));
+
+            // Enable TIM2 interrupt for debug purposes
+            p.TIM2.dier.modify(|_, w| w.uie().enabled());
+
+            // Enable TIM2
+            p.TIM2.cr1.modify(|_, w| w.cen().enabled());
+        }
+        defmt::println!("👻");
 
         // Setup Ethernet
         let Parts {
@@ -294,21 +379,8 @@ mod app {
                 ptp_port,
                 tx_waker: WakerRegistration::new(),
             },
-            Local {
-                adc1,
-                adc1_buf: [0; 16],
-                adc1_dma_stream: adc1_stream,
-            },
+            Local {},
         )
-    }
-
-    #[task(local = [adc1, adc1_buf, adc1_dma_stream])]
-    async fn read_adc(mut cx: read_adc::Context) {
-        let adc = cx.local.adc1;
-        let mut dma_buf = pin!(*cx.local.adc1_buf);
-        loop {
-            Systick::delay(1u64.secs()).await;
-        }
     }
 
     /// Task that runs the BMCA every required interval
@@ -538,9 +610,25 @@ mod app {
         }
     }
 
-    #[task(binds = DMA2_STREAM0, priority = 3)]
+    #[task(binds = DMA2_STREAM0, priority = 1)]
     fn on_dma2_stream0(mut cx: on_dma2_stream0::Context) {
-        defmt::error!("DMA2_STREAM0!");
+        defmt::println!("DMA2_STREAM0!");
+
+    }
+
+    #[task(binds = TIM2, priority = 2)]
+    fn on_tim2_update(mut cx: on_tim2_update::Context) {
+        let tim2 = unsafe {&* pac::TIM2::ptr()};
+        tim2.sr.modify(|_, w| w.uif().clear());
+        defmt::println!("TIM2!");
+    }
+
+    #[task(binds = ADC, priority = 2)]
+    fn on_adc1_conversion(mut cx: on_adc1_conversion::Context) {
+        let adc1 = unsafe { &* pac::ADC1::ptr()};
+        adc1.sr.modify(|_, w| w.eoc().not_complete());
+
+        defmt::println!("ADC!");
     }
 
     /// Handle the interrupt of the ethernet peripheral

@@ -29,6 +29,7 @@ az = "1.2"
 static_cell = "1.2.0"
 log-to-defmt = "0.1.0"
 adler = { version = "1.0.2", default-features = false }
+fugit = "0.3.7"
 
 [profile.release]
 debug = 2

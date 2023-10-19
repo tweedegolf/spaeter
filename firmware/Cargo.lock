@@ -722,6 +722,7 @@ dependencies = [
  "defmt-rtt",
  "embassy-sync",
  "fixed",
+ "fugit",
  "futures",
  "ieee802_3_miim",
  "log-to-defmt",

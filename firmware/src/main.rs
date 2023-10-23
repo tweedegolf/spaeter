@@ -293,7 +293,7 @@ mod app {
             // Enable TIM2
             p.TIM2.cr1.modify(|_, w| w.cen().enabled());
             
-            p.TIM1.ccer.modify(|_, w| w.cc1e().clear_bit());
+            p.TIM2.ccer.modify(|_, w| w.cc1e().clear_bit());
 
             p.TIM2
                 .ccmr1_input()
@@ -304,7 +304,7 @@ mod app {
             p.TIM2.cr2.modify(|_, w| w.ti1s().normal());
 
             // Enable CC1
-            p.TIM1.ccer.modify(|_, w| w.cc1e().set_bit());
+            p.TIM2.ccer.modify(|_, w| w.cc1e().set_bit());
 
         }
         defmt::println!("👻");

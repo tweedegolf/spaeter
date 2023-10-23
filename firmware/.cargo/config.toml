@@ -12,4 +12,4 @@ rustflags = [
 target = "thumbv7em-none-eabihf"
 
 [env]
-DEFMT_LOG = "info,stm32_ptp=trace"
+DEFMT_LOG = "info,statime_stm32=trace"

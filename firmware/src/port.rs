@@ -260,7 +260,7 @@ pub fn setup_statime(
     ptp_peripheral: stm32_eth::ptp::EthernetPTP,
     mac_address: [u8; 6],
     rng: Rng,
-) -> (&'static PtpInstance<BasicFilter>, StmPort<InBmca<'static>>) {
+) -> (&'static PtpInstance<BasicFilter>, StmPort<InBmca<'static>>, &'static PtpClock) {
     static PTP_CLOCK: StaticCell<PtpClock> = StaticCell::new();
     let ptp_clock = &*PTP_CLOCK.init(PtpClock::new(ptp_peripheral));
 
@@ -283,11 +283,11 @@ pub fn setup_statime(
     let port_config = PortConfig {
         acceptable_master_list: (),
         delay_mechanism: statime::DelayMechanism::E2E {
-            interval: Interval::from_log_2(-2),
+            interval: Interval::from_log_2(0),
         },
         announce_interval: Interval::from_log_2(1),
         announce_receipt_timeout: 3,
-        sync_interval: Interval::from_log_2(-6),
+        sync_interval: Interval::from_log_2(0),
         master_only: false,
         delay_asymmetry: Duration::ZERO,
     };
@@ -295,7 +295,7 @@ pub fn setup_statime(
 
     let ptp_port = ptp_instance.add_port(port_config, filter_config, ptp_clock, rng);
 
-    (ptp_instance, ptp_port)
+    (ptp_instance, ptp_port, ptp_clock)
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

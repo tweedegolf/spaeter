@@ -46,16 +46,11 @@ defmt::timestamp!("{=u64:iso8601ms}", {
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
     use defmt::Debug2Format;
-    use smoltcp::storage::PacketBuffer;
-    use stm32f7xx_hal::{
-        adc::Adc,
-        gpio::Alternate,
-        pac::{self, ADC1},
-        rcc::Reset,
-    };
+    use stm32_eth::ptp::{EthernetPTP, Subseconds, Timestamp};
+    use stm32f7xx_hal::{pac, rcc::Reset, gpio::Input};
 
     use super::*;
-    use crate::port::TimerName;
+    use crate::{port::TimerName, ptp_clock::PtpClock};
 
     const DMA_CHUNK_NUM_CONVERSIONS: u16 = 1024 * 8;
     const DMA_CHUNK_SIZE: usize = 4;
@@ -90,12 +85,9 @@ mod app {
         let mut rcc = p.RCC.constrain();
         // Setup clocks
         let clocks = {
-            let clocks = rcc
-                .cfgr
-                .sysclk(216.MHz())
-                .hclk(216.MHz())
-                .pclk1(27.MHz())
-                .pclk2(27.MHz());
+            let clocks = rcc.cfgr.sysclk(216.MHz()).hclk(216.MHz());
+            // .pclk1(27.MHz())
+            // .pclk2(27.MHz());
 
             clocks.freeze()
         };
@@ -122,7 +114,9 @@ mod app {
             let gpioc = p.GPIOC.split();
             let gpiog = p.GPIOG.split();
 
-            let _ = gpioa.pa3.into_analog();
+            let _adc1_in = gpioa.pa3.into_analog();
+            let _tim2_it1: Pin<'A', 5, stm32f7xx_hal::gpio::Alternate<1>> =
+                gpioa.pa5.into_alternate();
 
             let led_pin = gpiob.pb7.into_push_pull_output();
             let pps = gpiob.pb5.into_push_pull_output();
@@ -281,13 +275,37 @@ mod app {
             // Set Master mode trigger on timer enable, which will enable ADC1 as well
             p.TIM2.cr2.modify(|_, w| w.mms().enable());
             // ARR resets to u32::MAX
-            p.TIM2.arr.reset();
+            p.TIM2.arr.write(|w| w.arr().bits(clocks.timclk1().to_Hz()));
 
-            // Enable TIM2 interrupt for debug purposes
-            p.TIM2.dier.modify(|_, w| w.uie().enabled());
+            // Enable TIM2 CC1 capture interrupt as well as update interrupt to detect overflows
+            p.TIM2
+                .dier
+                .modify(|_, w| w.uie().enabled().cc1ie().enabled());
+
+            // Connect PTP to TIM2 ITR1
+            // p.TIM2.or.write(|w| unsafe { w.itr1_rmp().bits(0b01) });
+            // Connect TIM2 ITR1 to ITR
+            // p.TIM2.smcr.modify(|_, w| w.ts().itr1());
+
+            // Configures TIM2 CC1 to capture the timer value on ITR
+            // p.TIM2.ccmr1_input().modify(|_, w| w.cc1s().trc());
 
             // Enable TIM2
             p.TIM2.cr1.modify(|_, w| w.cen().enabled());
+            
+            p.TIM1.ccer.modify(|_, w| w.cc1e().clear_bit());
+
+            p.TIM2
+                .ccmr1_input()
+                .modify(|_, w| unsafe { w.cc1s().ti1().ic1f().no_filter().ic1psc().bits(0b00) });
+            p.TIM2
+                .ccer
+                .modify(|_, w| w.cc1p().clear_bit().cc1np().clear_bit());
+            p.TIM2.cr2.modify(|_, w| w.ti1s().normal());
+
+            // Enable CC1
+            p.TIM1.ccer.modify(|_, w| w.cc1e().set_bit());
+
         }
         defmt::println!("👻");
 
@@ -344,7 +362,7 @@ mod app {
 
         // Setup statime
         let rng = p.RNG.init();
-        let (ptp_instance, ptp_port) = setup_statime(ptp, mac_address, rng);
+        let (ptp_instance, ptp_port, ptp_clock) = setup_statime(ptp, mac_address, rng);
 
         // Setup message channels
         type TimerMsg = (TimerName, core::time::Duration);
@@ -365,7 +383,8 @@ mod app {
         // Start tasks
         {
             // Blink LED
-            blinky::spawn(led_pin).unwrap_or_else(|_| defmt::panic!("Failed to start blinky"));
+            blinky::spawn(led_pin, ptp_clock)
+                .unwrap_or_else(|_| defmt::panic!("Failed to start blinky"));
 
             // Listen on sockets
             event_listen::spawn().unwrap_or_else(|_| defmt::panic!("Failed to start event_listen"));
@@ -386,7 +405,7 @@ mod app {
 
             // Poll network interfaces and run DHCP
             poll_smoltcp::spawn().unwrap_or_else(|_| defmt::panic!("Failed to start poll_smoltcp"));
-            dhcp::spawn(dhcp_socket).unwrap_or_else(|_| defmt::panic!("Failed to start dhcp"));
+            // dhcp::spawn(dhcp_socket).unwrap_or_else(|_| defmt::panic!("Failed to start dhcp"));
         }
 
         (
@@ -539,19 +558,35 @@ mod app {
     /// Blinks the blue LED on the Nucleo board to indicate that the program is
     /// running
     #[task(priority = 0)]
-    async fn blinky(_cx: blinky::Context, mut led: Pin<'B', 7, Output>) {
+    async fn blinky(
+        _cx: blinky::Context,
+        mut led: Pin<'B', 7, Output>,
+        ptp_clock: &'static PtpClock,
+    ) {
+        const PTP_SYNC_INTERVAL: Timestamp = Timestamp::new(
+            false,
+            0,
+            match Subseconds::new_from_nanos(1000 * 1000 * 500) {
+                Some(s) => s,
+                None => unreachable!(),
+            },
+        );
+        let now = EthernetPTP::now();
+        let ptp_target_time = now + PTP_SYNC_INTERVAL;
+        // defmt::println!("PTP now: {}; target: {}", now, ptp_target_time);
         loop {
+            ptp_clock.access(|clock| clock.configure_target_time_interrupt(ptp_target_time));
             let dma2 = unsafe { &*pac::DMA2::ptr() };
             let lisr = dma2.lisr.read().bits();
             let cfg = dma2.st[0].cr.read().bits();
             let ndtr = dma2.st[0].ndtr.read().bits();
-            defmt::println!(
-                "cfg={=u32:032b}\tndtr={=u32}\tlisr={=u32:032b}",
-                cfg,
-                ndtr,
-                lisr
-            );
-
+            // defmt::info!(
+            //     "cfg={=u32:032b}\tndtr={=u32}\tlisr={=u32:032b}",
+            //     cfg,
+            //     ndtr,
+            //     lisr
+            // );
+            // unsafe{&*pac::TIM2::ptr()}.egr.write(|w| w.cc1g().trigger());
             Systick::delay(500u64.millis()).await;
             led.set_high();
             Systick::delay(500u64.millis()).await;
@@ -658,19 +693,27 @@ mod app {
         // defmt::println!("DMA2_STREAM0! {:?}", datum2);
     }
 
-    #[task(binds = TIM2, priority = 2)]
+    #[task(binds = TIM2, priority = 1)]
     fn on_tim2_update(mut cx: on_tim2_update::Context) {
         let tim2 = unsafe { &*pac::TIM2::ptr() };
-        tim2.sr.modify(|_, w| w.uif().clear());
-        defmt::println!("TIM2!");
+        let sr = tim2.sr.read();
+        tim2.sr.write(|w| unsafe { w.bits(!sr.bits()) });
+
+        // if sr.cc1if().bit_is_set() {
+        // }
+
+        let cc1 = tim2.ccr1.read().ccr().bits();
+        defmt::println!("TIM2 CC1: {}", cc1);
+        defmt::println!("TIM2 {=u32:032b}!", sr.bits());
     }
 
-    #[task(binds = ADC, priority = 2)]
+    #[task(binds = ADC, priority = 1)]
     fn on_adc1_conversion(mut cx: on_adc1_conversion::Context) {
         let adc1 = unsafe { &*pac::ADC1::ptr() };
         let sr = adc1.sr.read().bits();
         defmt::println!("ADC1 SR: {=u32:032b}", sr);
-        adc1.sr.modify(|_, w| w.eoc().not_complete().strt().not_started());
+        adc1.sr
+            .modify(|_, w| w.eoc().not_complete().strt().not_started());
 
         let overrun = adc1.sr.read().ovr().bit_is_set();
         if overrun {
@@ -688,6 +731,10 @@ mod app {
         // Receiving a tx event wakes the task waiting for tx timestamps
         if reason.tx {
             cx.shared.tx_waker.lock(|tx_waker| tx_waker.wake());
+        }
+
+        if reason.time_passed {
+            defmt::info!("Timestamp trigger !!@#!@#");
         }
 
         // Let smoltcp handle any new packets

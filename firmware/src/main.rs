@@ -46,13 +46,7 @@ defmt::timestamp!("{=u64:iso8601ms}", {
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
     use defmt::Debug2Format;
-    use smoltcp::storage::PacketBuffer;
-    use stm32f7xx_hal::{
-        adc::Adc,
-        gpio::Alternate,
-        pac::{self, ADC1},
-        rcc::Reset,
-    };
+    use stm32f7xx_hal::{pac, rcc::Reset};
 
     use super::*;
     use crate::port::TimerName;
@@ -79,11 +73,6 @@ mod app {
     ])]
     fn init(cx: init::Context) -> (Shared, Local) {
         let p = cx.device;
-
-        // Enable TIM2, ADC1 and DMA2 clocks
-        p.RCC.apb1enr.modify(|_, w| w.tim2en().enabled());
-        p.RCC.apb2enr.modify(|_, w| w.adc1en().enabled());
-        p.RCC.ahb1enr.modify(|_, w| w.dma2en().enabled());
 
         defmt::println!("HELLO!!O!O!");
 
@@ -159,21 +148,21 @@ mod app {
         };
 
         defmt::println!("Going to do scary stuff now");
-        // Setup ADC1 and DMA2
+        // Setup TIM2, ADC1 and DMA2
         {
-            // let p = unsafe { pac::Peripherals::steal() };
-
             /*
                Configure DMA2 Stream 0 to read 16-bit conversions from ADC1
                and write them into ADC_CONVERSION_DATA
                in double-buffer mode
             */
-
+            let dma2 = p.DMA2;
+            // Enable DMA2 clock
+            <pac::DMA2 as stm32f7xx_hal::rcc::Enable>::enable(&mut rcc.ahb1);
             // Disable DMA2 Stream 0
-            p.DMA2.st[0].cr.modify(|_, w| w.en().disabled());
+            dma2.st[0].cr.modify(|_, w| w.en().disabled());
 
             // Choose channel 0 for DMA2 Stream 0
-            p.DMA2.st[0].cr.modify(|_, w| {
+            dma2.st[0].cr.modify(|_, w| {
                 // Select channel 0 (ADC1)
                 w.chsel()
                     .bits(0)
@@ -216,26 +205,26 @@ mod app {
             });
 
             // Set buffer size
-            p.DMA2.st[0]
+            dma2.st[0]
                 .ndtr
                 .modify(|_, w| w.ndt().bits(DMA_CHUNK_NUM_CONVERSIONS));
 
             // Set peripheral address to ADC1 data register
-            p.DMA2.st[0]
+            dma2.st[0]
                 .par
                 .write(|w| unsafe { w.pa().bits(p.ADC1.dr.as_ptr() as u32) });
 
             // Point DMA Memory 0 to first chunk of ADC_CONVERSION_DATA
-            p.DMA2.st[0]
+            dma2.st[0]
                 .m0ar
                 .write(|w| unsafe { w.m0a().bits(ADC_CONVERSION_DATA[0].as_ptr() as u32) });
             // Point DMA Memory 1 to second chunk of ADC_CONVERSION_DATA
-            p.DMA2.st[0]
+            dma2.st[0]
                 .m1ar
                 .write(|w| unsafe { w.m1a().bits(ADC_CONVERSION_DATA[1].as_ptr() as u32) });
 
             // Enable DMA2 Stream 0
-            p.DMA2.st[0].cr.modify(|_, w| w.en().enabled());
+            dma2.st[0].cr.modify(|_, w| w.en().enabled());
 
             /*
                Configure ADC1 to 12-bits resolution in
@@ -243,11 +232,13 @@ mod app {
                and read out using DMA
             */
 
-            // Power down ADC1
-            p.ADC1.cr2.modify(|_, w| w.adon().clear_bit());
-
-            // Reset ADC1
             let adc1 = p.ADC1;
+            // Power down ADC1
+            adc1.cr2.modify(|_, w| w.adon().clear_bit());
+
+            // Enable ADC1 clock
+            <pac::ADC1 as stm32f7xx_hal::rcc::Enable>::enable(&mut rcc.apb2);
+            // Reset ADC1
             <pac::ADC1 as Reset>::reset(&mut rcc.apb2);
 
             // Setup ADC1 for contonuous conversion mode
@@ -278,16 +269,18 @@ mod app {
             /*
                 Setup TIM2 to trigger ADC1 using TRGO on update event generation
             */
+            let tim2 = p.TIM2;
             // Set Master mode trigger on timer enable, which will enable ADC1 as well
-            p.TIM2.cr2.modify(|_, w| w.mms().enable());
+            <pac::TIM2 as stm32f7xx_hal::rcc::Enable>::enable(&mut rcc.apb1);
+            tim2.cr2.modify(|_, w| w.mms().enable());
             // ARR resets to u32::MAX
-            p.TIM2.arr.reset();
+            tim2.arr.reset();
 
             // Enable TIM2 interrupt for debug purposes
-            p.TIM2.dier.modify(|_, w| w.uie().enabled());
+            tim2.dier.modify(|_, w| w.uie().enabled());
 
             // Enable TIM2
-            p.TIM2.cr1.modify(|_, w| w.cen().enabled());
+            tim2.cr1.modify(|_, w| w.cen().enabled());
         }
         defmt::println!("👻");
 
@@ -670,7 +663,8 @@ mod app {
         let adc1 = unsafe { &*pac::ADC1::ptr() };
         let sr = adc1.sr.read().bits();
         defmt::println!("ADC1 SR: {=u32:032b}", sr);
-        adc1.sr.modify(|_, w| w.eoc().not_complete().strt().not_started());
+        adc1.sr
+            .modify(|_, w| w.eoc().not_complete().strt().not_started());
 
         let overrun = adc1.sr.read().ovr().bit_is_set();
         if overrun {

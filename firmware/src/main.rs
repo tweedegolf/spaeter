@@ -43,18 +43,18 @@ defmt::timestamp!("{=u64:iso8601ms}", {
     time.seconds() as u64 * 1_000 + (time.subseconds().nanos() / 1000000) as u64
 });
 
+const ADC_DMA_BUFFER_SIZE: usize = 1024 * 32;
+const DMA_CHUNK_SIZE: u16 = 1024;
+
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
+
+    use bbqueue::{BBBuffer, Consumer, GrantW, Producer};
     use defmt::Debug2Format;
     use stm32f7xx_hal::{pac, rcc::Reset};
 
     use super::*;
     use crate::port::TimerName;
-
-    const DMA_CHUNK_NUM_CONVERSIONS: u16 = 1024 * 8;
-    const DMA_CHUNK_SIZE: usize = 4;
-    static mut ADC_CONVERSION_DATA: [[u16; DMA_CHUNK_NUM_CONVERSIONS as usize]; DMA_CHUNK_SIZE] =
-        [[0; DMA_CHUNK_NUM_CONVERSIONS as usize]; DMA_CHUNK_SIZE];
 
     #[shared]
     struct Shared {
@@ -64,12 +64,18 @@ mod app {
     }
 
     #[local]
-    struct Local {}
+    struct Local {
+        adc_dma_prod: Producer<'static, ADC_DMA_BUFFER_SIZE>,
+        adc_dma_cons: Consumer<'static, ADC_DMA_BUFFER_SIZE>,
+        dma_w_a: GrantW<'static, ADC_DMA_BUFFER_SIZE>,
+        dma_w_b: GrantW<'static, ADC_DMA_BUFFER_SIZE>,
+    }
 
     #[init(local = [
         dma_resources: DmaResources = DmaResources::new(),
         sockets: [SocketStorage<'static>; 8] = [SocketStorage::EMPTY; 8],
-        udp_resources: [UdpSocketResources; 2] = [UdpSocketResources::new(); 2]
+        udp_resources: [UdpSocketResources; 2] = [UdpSocketResources::new(); 2],
+        adc_dma_buf: BBBuffer<ADC_DMA_BUFFER_SIZE> = BBBuffer::new(),
     ])]
     fn init(cx: init::Context) -> (Shared, Local) {
         let p = cx.device;
@@ -147,6 +153,10 @@ mod app {
             (led_pin, pps, eth_pins, mdio, mdc)
         };
 
+        let (mut adc_dma_prod, adc_dma_cons) = cx.local.adc_dma_buf.try_split().unwrap();
+        let dma_w_a = adc_dma_prod.grant_exact(DMA_CHUNK_SIZE as usize).unwrap();
+        let dma_w_b = adc_dma_prod.grant_exact(DMA_CHUNK_SIZE as usize).unwrap();
+
         defmt::println!("Going to do scary stuff now");
         // Setup TIM2, ADC1 and DMA2
         {
@@ -205,9 +215,7 @@ mod app {
             });
 
             // Set buffer size
-            dma2.st[0]
-                .ndtr
-                .modify(|_, w| w.ndt().bits(DMA_CHUNK_NUM_CONVERSIONS));
+            dma2.st[0].ndtr.modify(|_, w| w.ndt().bits(DMA_CHUNK_SIZE));
 
             // Set peripheral address to ADC1 data register
             dma2.st[0]
@@ -217,11 +225,11 @@ mod app {
             // Point DMA Memory 0 to first chunk of ADC_CONVERSION_DATA
             dma2.st[0]
                 .m0ar
-                .write(|w| unsafe { w.m0a().bits(ADC_CONVERSION_DATA[0].as_ptr() as u32) });
+                .write(|w| unsafe { w.m0a().bits(dma_w_a.as_ptr() as u32) });
             // Point DMA Memory 1 to second chunk of ADC_CONVERSION_DATA
             dma2.st[0]
                 .m1ar
-                .write(|w| unsafe { w.m1a().bits(ADC_CONVERSION_DATA[1].as_ptr() as u32) });
+                .write(|w| unsafe { w.m1a().bits(dma_w_b.as_ptr() as u32) });
 
             // Enable DMA2 Stream 0
             dma2.st[0].cr.modify(|_, w| w.en().enabled());
@@ -388,7 +396,12 @@ mod app {
                 ptp_port,
                 tx_waker: WakerRegistration::new(),
             },
-            Local {},
+            Local {
+                adc_dma_prod,
+                adc_dma_cons,
+                dma_w_a,
+                dma_w_b,
+            },
         )
     }
 
@@ -630,25 +643,47 @@ mod app {
         }
     }
 
-    #[task(binds = DMA2_STREAM0, priority = 1)]
-    fn on_dma2_stream0(mut cx: on_dma2_stream0::Context) {
+    #[task(local = [adc_dma_cons], priority = 1)]
+    async fn read_adc_conv(cx: read_adc_conv::Context) {
+        let read = cx.local.adc_dma_cons.read().unwrap();
+        let len = read.len();
+        defmt::println!("{:?}", read.buf());
+        read.release(len);
+    }
+
+    #[task(binds = DMA2_STREAM0, priority = 10, local = [adc_dma_prod, dma_w_a, dma_w_b])]
+    fn on_dma2_stream0(cx: on_dma2_stream0::Context) {
         let dma2 = unsafe { &*pac::DMA2::ptr() };
-        let lisr = dma2.lisr.read().bits();
-        dma2.lifcr.write(|w| unsafe { w.bits(lisr) });
+        let lisr = dma2.lisr.read();
+        let cr = dma2.st[0].cr.read();
+        dma2.lifcr.write(|w| unsafe { w.bits(lisr.bits()) });
 
-        let cfg = dma2.st[0].cr.read().bits();
-        let ndtr = dma2.st[0].ndtr.read().bits();
-        // defmt::println!(
-        //     "cfg={=u32:032b}\tndtr={=u32}\tlisr={=u32:032b}",
-        //     cfg,
-        //     ndtr,
-        //     lisr
-        // );
-
-        let datum = unsafe { &ADC_CONVERSION_DATA[0][..16] };
-        let datum2 = unsafe { &ADC_CONVERSION_DATA[1][..16] };
-        // defmt::println!("DMA2_STREAM0! {:?}", datum);
-        // defmt::println!("DMA2_STREAM0! {:?}", datum2);
+        // If DMA2 finished a transfer on stream 0
+        if lisr.tcif0().is_complete() {
+            // Get new grant
+            let dma_w = cx
+                .local
+                .adc_dma_prod
+                .grant_exact(DMA_CHUNK_SIZE as usize)
+                .unwrap();
+            // If DMA2 is currently targeting memory 1,
+            // we swap out memory 0 and vice versa
+            if cr.ct().is_memory1() {
+                // point memory0 to new grant
+                dma2.st[0]
+                    .m0ar
+                    .write(|w| unsafe { w.m0a().bits(dma_w.as_ptr() as u32) });
+                // Swap out old grant with new one and drop old,
+                // thereby committing all of its contents immediately
+                let _ = core::mem::replace(cx.local.dma_w_a, dma_w);
+            } else {
+                dma2.st[0]
+                    .m1ar
+                    .write(|w| unsafe { w.m1a().bits(dma_w.as_ptr() as u32) });
+                let _ = core::mem::replace(cx.local.dma_w_b, dma_w);
+            }
+            read_adc_conv::spawn().ok();
+        }
     }
 
     #[task(binds = TIM2, priority = 2)]

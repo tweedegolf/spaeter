@@ -29,11 +29,13 @@ use stm32f7xx_hal::{
 };
 
 use crate::{
+    adc_capture::AdcCapture,
     ethernet::{generate_mac_address, recv_slice, UdpSocketResources},
     port::setup_statime,
     ptp_clock::stm_time_to_statime,
 };
 
+mod adc_capture;
 mod ethernet;
 mod port;
 mod ptp_clock;
@@ -46,16 +48,14 @@ defmt::timestamp!("{=u64:iso8601ms}", {
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
     use defmt::Debug2Format;
+    use static_cell::StaticCell;
     use stm32_eth::ptp::{EthernetPTP, Subseconds, Timestamp};
-    use stm32f7xx_hal::{gpio::Input, pac, rcc::Reset};
+    use stm32f7xx_hal::pac;
 
     use super::*;
-    use crate::{port::TimerName, ptp_clock::PtpClock};
+    use crate::{adc_capture::AdcCaptureBuffer, port::TimerName, ptp_clock::PtpClock};
 
-    const DMA_CHUNK_NUM_CONVERSIONS: u16 = 1024 * 8;
-    const DMA_CHUNK_SIZE: usize = 4;
-    static mut ADC_CONVERSION_DATA: [[u16; DMA_CHUNK_NUM_CONVERSIONS as usize]; DMA_CHUNK_SIZE] =
-        [[0; DMA_CHUNK_NUM_CONVERSIONS as usize]; DMA_CHUNK_SIZE];
+    static ADC_CONVERSION_DATA: StaticCell<AdcCaptureBuffer> = StaticCell::new();
 
     #[shared]
     struct Shared {
@@ -153,156 +153,17 @@ mod app {
         };
 
         defmt::println!("Going to do scary stuff now");
-        // Setup ADC1 and DMA2
-        {
-            // let p = unsafe { pac::Peripherals::steal() };
 
-            /*
-               Configure DMA2 Stream 0 to read 16-bit conversions from ADC1
-               and write them into ADC_CONVERSION_DATA
-               in double-buffer mode
-            */
-
-            // Disable DMA2 Stream 0
-            p.DMA2.st[0].cr.modify(|_, w| w.en().disabled());
-
-            // Choose channel 0 for DMA2 Stream 0
-            p.DMA2.st[0].cr.modify(|_, w| {
-                // Select channel 0 (ADC1)
-                w.chsel()
-                    .bits(0)
-                    // Enable Double-buffer mode
-                    .dbm()
-                    .enabled()
-                    // Disable circular mode
-                    .circ()
-                    .disabled()
-                    // Set data size to 16 bits at memory side
-                    .msize()
-                    .bits16()
-                    // Set data size to 16 bits at peripheral side
-                    .psize()
-                    .bits16()
-                    // Increment memory pointer after each read
-                    .minc()
-                    .incremented()
-                    // Do not increment peripheral data pointer
-                    .pinc()
-                    .fixed()
-                    // Write from peripheral to memory
-                    .dir()
-                    .peripheral_to_memory()
-                    // DMA controls when transfer ends (which is never due to circular mode)
-                    .pfctrl()
-                    .dma()
-                    // Enable Transfer Complete Interrupt
-                    .tcie()
-                    .enabled()
-                    // Enable Transfer Error Interrupt
-                    .teie()
-                    .enabled()
-                    // Enable Direct Mode Error Interrupt
-                    .dmeie()
-                    .enabled()
-                    // Select Memory 0 to start
-                    .ct()
-                    .memory0()
-            });
-
-            // Set buffer size
-            p.DMA2.st[0]
-                .ndtr
-                .modify(|_, w| w.ndt().bits(DMA_CHUNK_NUM_CONVERSIONS));
-
-            // Set peripheral address to ADC1 data register
-            p.DMA2.st[0]
-                .par
-                .write(|w| unsafe { w.pa().bits(p.ADC1.dr.as_ptr() as u32) });
-
-            // Point DMA Memory 0 to first chunk of ADC_CONVERSION_DATA
-            p.DMA2.st[0]
-                .m0ar
-                .write(|w| unsafe { w.m0a().bits(ADC_CONVERSION_DATA[0].as_ptr() as u32) });
-            // Point DMA Memory 1 to second chunk of ADC_CONVERSION_DATA
-            p.DMA2.st[0]
-                .m1ar
-                .write(|w| unsafe { w.m1a().bits(ADC_CONVERSION_DATA[1].as_ptr() as u32) });
-
-            // Enable DMA2 Stream 0
-            p.DMA2.st[0].cr.modify(|_, w| w.en().enabled());
-
-            /*
-               Configure ADC1 to 12-bits resolution in
-               single conversion mode and to be triggered externally from TIM2 TRGO
-               and read out using DMA
-            */
-
-            // Power down ADC1
-            p.ADC1.cr2.modify(|_, w| w.adon().clear_bit());
-
-            // Reset ADC1
-            let adc1 = p.ADC1;
-            <pac::ADC1 as Reset>::reset(&mut rcc.apb2);
-
-            // Setup ADC1 for contonuous conversion mode
-            adc1.cr2.modify(|_, w| w.cont().continuous());
-            adc1.cr1
-                .modify(|_, w| w.scan().clear_bit().discen().clear_bit());
-
-            // Setup ADC1 for external triggering by TIM2 TRGO
-            adc1.cr2
-                .modify(|_, w| unsafe { w.exten().rising_edge().extsel().bits(0b1011) });
-
-            // Setup ADC1 resolution to 12 bit
-            adc1.cr1.modify(|_, w| w.res().bits(0b00));
-
-            // Enable DMA on ADC1
-            adc1.cr2.modify(|_, w| w.dma().enabled().dds().continuous());
-
-            // Enable ADC end-of-conversion interrupt
-            adc1.cr1
-                .modify(|_, w| w.eocie().disabled().ovrie().enabled());
-
-            // Use PA3 as input
-            adc1.sqr3.modify(|_, w| unsafe { w.sq1().bits(3) });
-
-            // Power up ADC1
-            adc1.cr2.modify(|_, w| w.adon().enabled());
-
-            /*
-                Setup TIM2 to trigger ADC1 using TRGO on update event generation
-            */
-            // Set Master mode trigger on timer enable, which will enable ADC1 as well
-            p.TIM2.cr2.modify(|_, w| w.mms().enable());
-            // ARR resets to u32::MAX
-            p.TIM2.arr.write(|w| w.arr().bits(u32::MAX));
-
-            // Enable TIM2 CC1 capture interrupt as well as update interrupt to detect overflows
-            p.TIM2
-                .dier
-                .modify(|_, w| w.uie().enabled().cc1ie().enabled());
-
-            // Connect PTP to TIM2 ITR1
-            p.TIM2.or.write(|w| unsafe { w.itr1_rmp().bits(0b01) });
-            // Connect TIM2 ITR1 to ITR
-            p.TIM2.smcr.modify(|_, w| w.ts().itr1());
-
-            // Configures TIM2 CC1 to capture the timer value on ITR
-            p.TIM2
-                .ccmr1_input()
-                .modify(|_, w| unsafe { w.cc1s().trc().ic1f().no_filter().ic1psc().bits(0b00) });
-
-            // Enable TIM2
-            p.TIM2.cr1.modify(|_, w| w.cen().enabled());
-
-            p.TIM2
-                .ccer
-                .modify(|_, w| w.cc1p().clear_bit().cc1np().clear_bit());
-            p.TIM2.cr2.modify(|_, w| w.ti1s().normal());
-
-            // Enable CC1
-            p.TIM2.ccer.modify(|_, w| w.cc1e().set_bit());
-        }
+        let adc_conversion_data = ADC_CONVERSION_DATA.init_with(|| core::array::from_fn(|_| 0));
+        let adc_capture = AdcCapture::init(
+            adc_conversion_data,
+            p.ADC1,
+            p.TIM2,
+            p.DMA2.st[0],
+            &mut rcc.apb1,
+            &mut rcc.apb2,
+            &mut rcc.ahb1,
+        );
         defmt::println!("👻");
 
         // Setup Ethernet

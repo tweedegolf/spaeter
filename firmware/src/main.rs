@@ -47,7 +47,7 @@ defmt::timestamp!("{=u64:iso8601ms}", {
 mod app {
     use defmt::Debug2Format;
     use stm32_eth::ptp::{EthernetPTP, Subseconds, Timestamp};
-    use stm32f7xx_hal::{pac, rcc::Reset, gpio::Input};
+    use stm32f7xx_hal::{gpio::Input, pac, rcc::Reset};
 
     use super::*;
     use crate::{port::TimerName, ptp_clock::PtpClock};
@@ -275,7 +275,7 @@ mod app {
             // Set Master mode trigger on timer enable, which will enable ADC1 as well
             p.TIM2.cr2.modify(|_, w| w.mms().enable());
             // ARR resets to u32::MAX
-            p.TIM2.arr.write(|w| w.arr().bits(clocks.timclk1().to_Hz()));
+            p.TIM2.arr.write(|w| w.arr().bits(u32::MAX));
 
             // Enable TIM2 CC1 capture interrupt as well as update interrupt to detect overflows
             p.TIM2
@@ -283,21 +283,18 @@ mod app {
                 .modify(|_, w| w.uie().enabled().cc1ie().enabled());
 
             // Connect PTP to TIM2 ITR1
-            // p.TIM2.or.write(|w| unsafe { w.itr1_rmp().bits(0b01) });
+            p.TIM2.or.write(|w| unsafe { w.itr1_rmp().bits(0b01) });
             // Connect TIM2 ITR1 to ITR
-            // p.TIM2.smcr.modify(|_, w| w.ts().itr1());
+            p.TIM2.smcr.modify(|_, w| w.ts().itr1());
 
             // Configures TIM2 CC1 to capture the timer value on ITR
-            // p.TIM2.ccmr1_input().modify(|_, w| w.cc1s().trc());
+            p.TIM2
+                .ccmr1_input()
+                .modify(|_, w| unsafe { w.cc1s().trc().ic1f().no_filter().ic1psc().bits(0b00) });
 
             // Enable TIM2
             p.TIM2.cr1.modify(|_, w| w.cen().enabled());
-            
-            p.TIM2.ccer.modify(|_, w| w.cc1e().clear_bit());
 
-            p.TIM2
-                .ccmr1_input()
-                .modify(|_, w| unsafe { w.cc1s().ti1().ic1f().no_filter().ic1psc().bits(0b00) });
             p.TIM2
                 .ccer
                 .modify(|_, w| w.cc1p().clear_bit().cc1np().clear_bit());
@@ -305,7 +302,6 @@ mod app {
 
             // Enable CC1
             p.TIM2.ccer.modify(|_, w| w.cc1e().set_bit());
-
         }
         defmt::println!("👻");
 
@@ -571,10 +567,10 @@ mod app {
                 None => unreachable!(),
             },
         );
-        let now = EthernetPTP::now();
-        let ptp_target_time = now + PTP_SYNC_INTERVAL;
         // defmt::println!("PTP now: {}; target: {}", now, ptp_target_time);
         loop {
+            let now = EthernetPTP::now();
+            let ptp_target_time = now + PTP_SYNC_INTERVAL;
             ptp_clock.access(|clock| clock.configure_target_time_interrupt(ptp_target_time));
             let dma2 = unsafe { &*pac::DMA2::ptr() };
             let lisr = dma2.lisr.read().bits();

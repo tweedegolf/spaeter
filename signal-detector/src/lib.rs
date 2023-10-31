@@ -70,7 +70,7 @@ impl SignalDetector {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct SignalPeak {
     pub freq: f32,
     pub magnitude: f32,

@@ -190,7 +190,7 @@ mod tests {
             3.0,
             SAMPLE_FREQUENCY,
         );
-        // add_random_noise(&mut audio, 0.1);
+        add_random_noise(&mut audio, 0.1);
 
         let mut detector = SignalDetector::new(SAMPLE_FREQUENCY);
 
@@ -239,10 +239,10 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct Signal {
-        peaks: std::vec::Vec<SignalPeak>,
-        start: usize,
-        end: usize,
+    pub struct Signal {
+        pub peaks: std::vec::Vec<SignalPeak>,
+        pub start: usize,
+        pub end: usize,
     }
 
     impl Signal {

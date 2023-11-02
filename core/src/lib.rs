@@ -2,15 +2,23 @@
 
 use core::ops::{Add, AddAssign, Sub, SubAssign};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AnchorId(u32);
+pub mod topics;
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
-pub enum AnchorMessage {
-    SignalPeak {
-        timestamp: Timestamp,
-        peak: signal_detector::SignalPeak,
-    },
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AnchorId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Timestamped<T> {
+    pub timestamp: Timestamp,
+    pub value: T,
+}
+
+pub trait TopicData {
+    type Error;
+    fn serialize<'a>(&self, buffer: &'a mut [u8]) -> Result<&'a mut [u8], Self::Error>;
+    fn deserialize<'a>(buffer: &'a [u8]) -> Result<(Self, &'a [u8]), Self::Error>
+    where
+        Self: Sized;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -126,5 +134,57 @@ impl Sub for Timestamp {
 impl SubAssign for Timestamp {
     fn sub_assign(&mut self, rhs: Self) {
         *self = *self - rhs;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timestamp_add() {
+        assert_eq!(
+            Timestamp::from_millis(5) + Timestamp::from_micros(6),
+            Timestamp::from_micros(5006)
+        );
+        assert_eq!(
+            Timestamp::new(0, u32::MAX) + Timestamp::new(0, 1),
+            Timestamp::new(1, 0)
+        );
+    }
+
+    #[test]
+    fn timestamp_ord() {
+        assert!(Timestamp::from_nanos_f64(1.5) > Timestamp::new(1, 0));
+        assert!(Timestamp::new(1, 0) < Timestamp::from_nanos_f64(1.5));
+        assert!(Timestamp::new(1, 5123) == Timestamp::new(1, 5123));
+    }
+
+    #[test]
+    fn timestamp_sub() {
+        assert_eq!(
+            Timestamp::from_millis(5) - Timestamp::from_micros(6),
+            Timestamp::from_micros(4994)
+        );
+        assert_eq!(
+            Timestamp::new(1, 0) - Timestamp::new(0, 1),
+            Timestamp::new(0, u32::MAX)
+        );
+    }
+
+    #[test]
+    fn timestamp_f64() {
+        assert_eq!(
+            Timestamp::from_nanos_f64(1.5),
+            Timestamp::new(1, u32::MAX / 2 + 1),
+        );
+        assert_eq!(
+            Timestamp::from_nanos_f64(1000123.25),
+            Timestamp::new(1000123, u32::MAX / 4 + 1),
+        );
+        assert_eq!(
+            Timestamp::from_nanos_f64(1000123.25).as_nanos_f64(),
+            1000123.25,
+        );
     }
 }

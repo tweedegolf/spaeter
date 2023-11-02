@@ -2,33 +2,62 @@ use crate::{AnchorId, Timestamped, TopicData};
 use core::fmt::Write;
 use signal_detector::SignalPeak;
 
-pub const SIGNAL_PEAK_TOPIC: &str = "spaeter/anchor/+/signal_peak";
+const SIGNAL_PEAK_TOPIC: &str = "spaeter/anchor/+/signal_peak";
 pub type SignalPeakPayload = Timestamped<SignalPeak>;
 pub fn signal_peak_topic(
-    anchor_id: AnchorId,
+    anchor_id: Option<AnchorId>,
 ) -> heapless::String<{ SIGNAL_PEAK_TOPIC.len() + 10 }> {
     let mut s = heapless::String::new();
 
-    let (l, r) = SIGNAL_PEAK_TOPIC.split_once("+").unwrap();
+    let (l, r) = SIGNAL_PEAK_TOPIC.split_once('+').unwrap();
     s.push_str(l).unwrap();
-    write!(s, "{:08X}", anchor_id.0).unwrap();
+    if let Some(anchor_id) = anchor_id {
+        write!(s, "{:08X}", anchor_id.0).unwrap();
+    } else {
+        s.push('+').unwrap();
+    }
     s.push_str(r).unwrap();
 
     s
 }
+pub fn parse_signal_peak_topic(topic: &str) -> Option<AnchorId> {
+    let (l, r) = SIGNAL_PEAK_TOPIC.split_once("+").unwrap();
+
+    let anchor_string = topic.strip_prefix(l)?.strip_suffix(r)?;
+
+    Some(AnchorId(u32::from_str_radix(anchor_string, 16).ok()?))
+}
+
+#[derive(Debug, Clone)]
+pub enum Error {
+    Ser(serde_json_core::ser::Error),
+    De(serde_json_core::de::Error),
+}
+
+impl From<serde_json_core::de::Error> for Error {
+    fn from(v: serde_json_core::de::Error) -> Self {
+        Self::De(v)
+    }
+}
+
+impl From<serde_json_core::ser::Error> for Error {
+    fn from(v: serde_json_core::ser::Error) -> Self {
+        Self::Ser(v)
+    }
+}
 
 impl TopicData for SignalPeakPayload {
-    type Error = postcard::Error;
+    type Error = Error;
 
-    fn serialize<'a>(&self, buffer: &'a mut [u8]) -> Result<&'a mut [u8], Self::Error> {
-        postcard::to_slice(self, buffer)
+    fn serialize(&self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        Ok(serde_json_core::to_slice(self, buffer)?)
     }
 
-    fn deserialize<'a>(buffer: &'a [u8]) -> Result<(Self, &'a [u8]), Self::Error>
+    fn deserialize(buffer: &[u8]) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
-        postcard::take_from_bytes(buffer)
+        Ok(serde_json_core::from_slice(buffer).map(|(t, _)| t)?)
     }
 }
 
@@ -38,6 +67,10 @@ mod tests {
 
     #[test]
     fn signal_peak_topic_format() {
-        assert_eq!(&signal_peak_topic(AnchorId(0x123F)), "spaeter/anchor/0000123F/signal_peak");
+        assert_eq!(
+            &signal_peak_topic(Some(AnchorId(0x123F))),
+            "spaeter/anchor/0000123F/signal_peak"
+        );
+        assert_eq!(&signal_peak_topic(None), "spaeter/anchor/+/signal_peak");
     }
 }

@@ -7,6 +7,6 @@ edition = "2021"
 
 [dependencies]
 heapless = "0.7.16"
-postcard = "1.0.8"
+serde-json-core = { version = "0.5.1", features = ["custom-error-messages"] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 signal-detector = { path = "../signal-detector" }

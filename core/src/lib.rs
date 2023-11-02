@@ -15,8 +15,8 @@ pub struct Timestamped<T> {
 
 pub trait TopicData {
     type Error;
-    fn serialize<'a>(&self, buffer: &'a mut [u8]) -> Result<&'a mut [u8], Self::Error>;
-    fn deserialize<'a>(buffer: &'a [u8]) -> Result<(Self, &'a [u8]), Self::Error>
+    fn serialize(&self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
+    fn deserialize(buffer: &[u8]) -> Result<Self, Self::Error>
     where
         Self: Sized;
 }

@@ -28,9 +28,9 @@ fn main() {
         process::exit(1);
     }
 
-    for anchor in [AnchorId(0), AnchorId(1), AnchorId(2), AnchorId(3)] {
-        let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
+    for anchor in [AnchorId(0), AnchorId(1), AnchorId(2), AnchorId(3)] {
         for ts in [
             Timestamp::from_millis(0),
             Timestamp::from_millis(1),
@@ -40,7 +40,7 @@ fn main() {
             let mut buffer = [0; 512];
 
             let len = SignalPeakPayload {
-                timestamp: Timestamp::new(current_time.as_nanos() as u64, 0) + ts,
+                timestamp: Timestamp::new(current_time.as_nanos() as u64, 0) + ts + Timestamp::from_millis(anchor.0 as u64 * 5),
                 value: SignalPeak {
                     freq: 1000.0,
                     magnitude: 10.0,

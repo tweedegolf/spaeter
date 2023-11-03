@@ -1,11 +1,40 @@
+#![feature(extract_if)]
+
 use futures_util::StreamExt;
+use glam::Vec3;
 use paho_mqtt::MQTT_VERSION_5;
-use spaeter_core::TopicData;
+use spaeter_core::{AnchorId, TopicData};
 use std::{error::Error, process, time::Duration};
+
+use crate::{
+    signal_correlator::SignalCorrelator, signal_locator::SignalLocator,
+    signal_peak_processor::SignalPeakProcessor,
+};
+
+mod signal;
+mod signal_correlator;
+mod signal_locator;
+mod signal_peak_processor;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mqtt_address = std::env::var("MQTT").unwrap();
+    // Set up the signal processing
+    let signal_locator = Box::leak(Box::new(SignalLocator::new(
+        [
+            (AnchorId(0), Vec3::new(0.0, 0.0, 0.0)),
+            (AnchorId(1), Vec3::new(10.0, 0.0, 0.0)),
+            (AnchorId(2), Vec3::new(0.0, 10.0, 0.0)),
+            (AnchorId(3), Vec3::new(10.0, 10.0, 10.0)),
+        ]
+        .into(),
+    )));
+    let signal_correlator = Box::leak(Box::new(SignalCorrelator::new(signal_locator)));
+    let signal_peak_processor = Box::leak(Box::new(SignalPeakProcessor::new(signal_correlator)));
+    tokio::spawn(signal_correlator.run());
+    tokio::spawn(signal_peak_processor.run());
+
+    let mqtt_address = std::env::var("MQTT")
+        .expect("Environment variable `MQTT` is required with a host url to an MQTT broker");
 
     println!("Connecting to the MQTT server at '{}'...", mqtt_address);
 
@@ -54,12 +83,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     while let Some(msg_opt) = strm.next().await {
         if let Some(msg) = msg_opt {
-            if msg.retained() {
-                print!("(R) ");
-            }
-            println!("{}", msg);
-
-            process_message(msg);
+            tokio::spawn(process_message(msg, signal_peak_processor));
         } else {
             // A "None" means we were disconnected. Try to reconnect...
             println!("Lost connection. Attempting reconnect.");
@@ -73,17 +97,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn process_message(message: paho_mqtt::Message) {
+async fn process_message(message: paho_mqtt::Message, signal_peak_processor: &SignalPeakProcessor) {
     if let Some(anchor_id) = spaeter_core::topics::parse_signal_peak_topic(message.topic()) {
-        println!("Received signal peak from {anchor_id:?}");
-
         match spaeter_core::topics::SignalPeakPayload::deserialize(message.payload()) {
             Ok(signal_peak) => {
-                println!("Received signal peak: {signal_peak:?}");
-            },
+                println!("Received signal peak: \n\t- {anchor_id:?}\n\t- {signal_peak:?}");
+                signal_peak_processor
+                    .register_signal_peak(anchor_id, signal_peak)
+                    .await;
+            }
             Err(e) => {
                 println!("Error deserializing signal peak: {e:?}");
-            },
+            }
         }
     }
 }

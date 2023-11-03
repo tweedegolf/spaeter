@@ -1,5 +1,5 @@
 [package]
-name = "spaeter-server"
+name = "spaeter-fake-anchors"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,9 +7,5 @@ edition = "2021"
 
 [dependencies]
 paho-mqtt = "0.12.3"
-tokio = { version = "1.33.0", features = ["full"] }
 spaeter-core = { path = "../core"}
 signal-detector = { path = "../signal-detector" }
-futures-util = "0.3.29"
-tdoa-solver = { git = "https://github.com/tweedegolf/tdoa-solver.git" }
-glam = "0.24.2"

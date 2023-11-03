@@ -4,7 +4,7 @@ use core::ops::{Add, AddAssign, Sub, SubAssign};
 
 pub mod topics;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AnchorId(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -21,10 +21,16 @@ pub trait TopicData {
         Self: Sized;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Timestamp {
     nanos: u64,
     subnanos: u32,
+}
+
+impl core::fmt::Debug for Timestamp {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.as_nanos_f64())
+    }
 }
 
 impl Timestamp {
@@ -75,6 +81,25 @@ impl Timestamp {
 
     pub const fn as_secs(&self) -> u64 {
         self.nanos / 1_000_000_000
+    }
+
+    #[must_use]
+    pub fn saturating_sub(&self, rhs: Self) -> Self {
+        if *self > rhs {
+            *self - rhs
+        } else {
+            Self::new(0, 0)
+        }
+    }
+
+    /// The absolute difference between the two timestampss
+    #[must_use]
+    pub fn difference_to(&self, rhs: Self) -> Self {
+        if *self > rhs {
+            *self - rhs
+        } else {
+            rhs - *self
+        }
     }
 }
 

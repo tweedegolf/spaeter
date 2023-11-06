@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), no_std)]
+// #![cfg_attr(not(test), no_std)]
 
 use heapless::Vec;
 use microfft::Complex32;
@@ -8,11 +8,12 @@ const MAX_TRACKED_PEAKS: usize = 8;
 
 pub struct SignalDetector {
     sample_freq: f32,
+    magnitude_floor: f32,
 }
 
 impl SignalDetector {
     pub const fn new(sample_freq: f32) -> Self {
-        Self { sample_freq }
+        Self { sample_freq, magnitude_floor: 0.0 }
     }
 
     pub fn feed(&mut self, data: &[f32], mut f: impl FnMut(usize, &[SignalPeak])) {
@@ -23,10 +24,14 @@ impl SignalDetector {
             let mut zero_padded_chunk = [0.0; SAMPLE_SIZE];
             zero_padded_chunk[..CHUNK_SIZE].copy_from_slice(chunk);
 
-            let next_signal = microfft::real::rfft_256(&mut zero_padded_chunk);
+            let fft_bins = microfft::real::rfft_256(&mut zero_padded_chunk);
 
-            let mut peaks = Self::find_peaks(next_signal, self.sample_freq);
-            peaks.retain(|peak| !peak.freq.is_nan());
+            let mut peaks = Self::find_peaks(fft_bins, self.sample_freq);
+            for peak in peaks.iter() {
+                self.magnitude_floor = self.magnitude_floor * 0.9999 + peak.magnitude * 0.0001;
+            }
+
+            peaks.retain(|peak| !peak.freq.is_nan() && peak.magnitude > self.magnitude_floor * 2.0);
             peaks.sort_unstable_by(|x, y| x.magnitude.total_cmp(&y.magnitude).reverse());
 
             f(i * CHUNK_SIZE, &peaks);

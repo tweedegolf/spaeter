@@ -31,7 +31,7 @@ impl SignalPeakProcessor {
 
         // Is there an existing signal we can add this peak to?
         let found_signal = anchor_signals.iter_mut().find(|signal| {
-            value.timestamp.difference_to(signal.end_time()) < Timestamp::from_millis(100)
+            value.timestamp.difference_to(signal.end_time()) < Timestamp::from_millis(200)
                 && (signal.average_frequency() - value.value.freq).abs()
                     <= MAX_SIGNAL_FREQUENCY_DEVIATION
         });
@@ -55,15 +55,16 @@ impl SignalPeakProcessor {
 
             for (anchor, signals) in signals.iter_mut() {
                 for finished_signal in signals.extract_if(|signal| {
-                    signal.end_time().difference_to(current_time) > Timestamp::from_millis(200)
+                    signal.end_time().difference_to(current_time) > Timestamp::from_millis(300)
                 }) {
-                    self.correlator
-                        .register_signal(*anchor, finished_signal.into())
-                        .await;
+                    tokio::spawn(
+                        self.correlator
+                            .register_signal(*anchor, finished_signal.into()),
+                    );
                 }
             }
 
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
 }

@@ -16,14 +16,20 @@ impl SignalLocator {
         Self { anchor_locations }
     }
 
-    pub fn locate_signal(&self, correlated_signals: Vec<(AnchorId, SignalSummary)>) {
-        let Some(earliest_signal) = correlated_signals
+    pub fn locate_signal(&self, mut correlated_signals: Vec<(AnchorId, SignalSummary)>) {
+        // Remove all anchors we don't know so we don't crash later on
+        correlated_signals.retain(|(id, _)| self.anchor_locations.contains_key(id));
+
+        if correlated_signals.len() < 3 {
+            return;
+        }
+
+        let earliest_signal = correlated_signals
             .iter()
             .map(|(_, signal)| signal.start_time())
-            .min()
-        else {
-            return;
-        };
+            .min().unwrap();
+
+        let average_magnitude = correlated_signals.iter().map(|x| x.1.average_magnitude()).sum::<f32>() / correlated_signals.len() as f32;
 
         let mut entries = correlated_signals
             .iter()
@@ -35,11 +41,17 @@ impl SignalLocator {
             })
             .collect::<Vec<_>>();
 
-        let locations = tdoa_solver::solve(&mut entries, SIGNAL_SPEED, 5);
+        let mut locations = tdoa_solver::solve(&mut entries, SIGNAL_SPEED, 2);
 
-        println!(
-            "Found locations. time: {earliest_signal:?}, freq: {}, locations: {locations:?}",
-            correlated_signals.first().unwrap().1.average_frequency()
-        );
+        locations.iter_mut().for_each(|(_, confidence)| *confidence = *confidence * average_magnitude / 1000.0);
+
+        locations.retain(|(_, confidence)| *confidence > 1.0);
+
+        if locations.len() > 0 {
+            println!(
+                "Found locations. time: {earliest_signal:?}, freq: {}, locations: {locations:?}",
+                correlated_signals.first().unwrap().1.average_frequency()
+            );
+        }
     }
 }

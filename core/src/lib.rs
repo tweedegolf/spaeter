@@ -1,8 +1,10 @@
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
 use core::ops::{Add, AddAssign, Sub, SubAssign};
 
 pub mod topics;
+#[cfg(feature = "config")]
+pub mod config;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AnchorId(pub u32);

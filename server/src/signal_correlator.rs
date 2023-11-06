@@ -31,7 +31,7 @@ impl SignalCorrelator {
             );
 
             while let Some((_, signal)) = buffer.first() {
-                if current_time.difference_to(signal.end_time()) < Timestamp::from_millis(500) {
+                if current_time.difference_to(signal.end_time()) < Timestamp::from_millis(400) {
                     break;
                 }
 
@@ -50,14 +50,17 @@ impl SignalCorrelator {
                     })
                     .collect::<Vec<_>>();
 
+                // println!("Correlated signals @{}hz {}", frequency, correlated_signals.len());
+
                 tokio::task::spawn_blocking(|| self.locator.locate_signal(correlated_signals));
             }
 
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
 
     pub async fn register_signal(&self, anchor: AnchorId, signal: SignalSummary) {
         self.buffer.lock().await.push((anchor, signal));
+        // println!("Added signal");
     }
 }

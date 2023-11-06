@@ -4,15 +4,16 @@ services:
     image: docker.tgrep.nl/docker/rust-dev:1.73
     volumes:
       - ./server:/app/server
+      - ./server-config.toml:/app/server-config.toml
       - target:/app/server/target
       - ./core:/app/core
       - ./signal-detector:/app/signal-detector
       - registry:/usr/local/cargo/registry
       - git:/usr/local/cargo/git
-    command: [ "cargo", "watch", "-x", "run", "--poll" ]
+    command: [ "cargo", "watch", "-x", "run --release", "--poll" ]
     working_dir: /app/server
     environment:
-      MQTT: "mqtt:1883"
+      MQTT: "mqtt://mqtt:1883?client_id=spaeter-server"
       LOG: debug
       RUST_BACKTRACE: 1
     networks: [default]
@@ -20,10 +21,10 @@ services:
     tty: true
 
   mqtt:
-    image: eclipse-mosquitto
+    image: bytebeamio/rumqttd
     volumes:
-      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
-    ports: ["1883:1883", "9001:9001"]
+      - ./rumqttd.toml:/rumqttd.toml
+    ports: ["1883:1883", "1884:1884"]
     networks: [default]
 
 networks:

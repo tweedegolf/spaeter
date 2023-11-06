@@ -28,6 +28,9 @@ impl Signal {
     pub fn average_frequency(&self) -> f32 {
         self.peaks.iter().map(|peak| peak.value.freq).sum::<f32>() / self.peaks.len() as f32
     }
+    pub fn average_magnitude(&self) -> f32 {
+        self.peaks.iter().map(|peak| peak.value.magnitude).sum::<f32>() / self.peaks.len() as f32
+    }
 
     pub fn start_time(&self) -> Timestamp {
         self.peaks.first().unwrap().timestamp
@@ -43,11 +46,16 @@ pub struct SignalSummary {
     start: Timestamp,
     end: Timestamp,
     frequency: f32,
+    magnitude: f32
 }
 
 impl SignalSummary {
     pub fn average_frequency(&self) -> f32 {
         self.frequency
+    }
+
+    pub fn average_magnitude(&self) -> f32 {
+        self.magnitude
     }
 
     pub fn start_time(&self) -> Timestamp {
@@ -65,6 +73,7 @@ impl From<Signal> for SignalSummary {
             start: value.start_time(),
             end: value.end_time(),
             frequency: value.average_frequency(),
+            magnitude: value.average_magnitude(),
         }
     }
 }

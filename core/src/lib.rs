@@ -2,9 +2,9 @@
 
 use core::ops::{Add, AddAssign, Sub, SubAssign};
 
-pub mod topics;
 #[cfg(feature = "config")]
 pub mod config;
+pub mod topics;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AnchorId(pub u32);

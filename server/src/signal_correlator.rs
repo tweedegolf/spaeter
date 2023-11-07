@@ -31,7 +31,8 @@ impl SignalCorrelator {
             );
 
             while let Some((_, signal)) = buffer.first() {
-                if current_time.difference_to(signal.end_time()) < Timestamp::from_millis(400) {
+                if current_time.difference_to(signal.end_time()) < crate::SIGNAL_CORRELATOR_TIMEOUT
+                {
                     break;
                 }
 
@@ -39,10 +40,13 @@ impl SignalCorrelator {
                 let start_time = signal.start_time();
                 let end_time = signal.end_time();
                 let frequency = signal.average_frequency();
+                let magnitude = signal.average_magnitude();
 
                 let correlated_signals = buffer
                     .extract_if(|(_, signal)| {
                         (signal.average_frequency() - frequency).abs() < 50.0
+                            && signal.average_magnitude() > magnitude * 0.5
+                            && signal.average_magnitude() < magnitude * 1.5
                             && signal.start_time().difference_to(start_time)
                                 < Timestamp::from_millis(100)
                             && signal.end_time().difference_to(end_time)
@@ -50,7 +54,21 @@ impl SignalCorrelator {
                     })
                     .collect::<Vec<_>>();
 
-                // println!("Correlated signals @{}hz {}", frequency, correlated_signals.len());
+                if magnitude > 100.0 {
+                    log::debug!(
+                        "Correlated strong signals @{:7.1}hz, {:7.1} - {}",
+                        frequency,
+                        magnitude,
+                        correlated_signals.len()
+                    );
+                } else {
+                    log::trace!(
+                        "Correlated weak signals @{:7.1}hz, {:7.1} - {}",
+                        frequency,
+                        magnitude,
+                        correlated_signals.len()
+                    );
+                }
 
                 tokio::task::spawn_blocking(|| self.locator.locate_signal(correlated_signals));
             }
@@ -60,7 +78,12 @@ impl SignalCorrelator {
     }
 
     pub async fn register_signal(&self, anchor: AnchorId, signal: SignalSummary) {
+        if signal.average_magnitude() > 100.0 {
+            log::debug!("Registered strong signal:\n{signal:7.1?}");
+        } else {
+            log::trace!("Registered weak signal:\n{signal:7.1?}");
+        }
+
         self.buffer.lock().await.push((anchor, signal));
-        // println!("Added signal");
     }
 }

@@ -1,5 +1,6 @@
-use crate::{AnchorId, Timestamped, TopicData};
+use crate::{AnchorId, Timestamp, Timestamped, TopicData};
 use core::fmt::Write;
+use glam::Vec3;
 use signal_detector::SignalPeak;
 
 const SIGNAL_PEAK_TOPIC: &str = "spaeter/anchor/+/signal_peak";
@@ -47,6 +48,31 @@ impl From<serde_json_core::ser::Error> for Error {
 }
 
 impl TopicData for SignalPeakPayload {
+    type Error = Error;
+
+    fn serialize(&self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        Ok(serde_json_core::to_slice(self, buffer)?)
+    }
+
+    fn deserialize(buffer: &[u8]) -> Result<Self, Self::Error>
+    where
+        Self: Sized,
+    {
+        Ok(serde_json_core::from_slice(buffer).map(|(t, _)| t)?)
+    }
+}
+
+pub const DETECTED_LOCATION_TOPIC: &str = "spaeter/detected_location";
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct DetectedLocation {
+    pub location: Vec3,
+    pub frequency: f32,
+    pub confidence: f32,
+    pub timestamp: Timestamp,
+}
+
+impl TopicData for DetectedLocation {
     type Error = Error;
 
     fn serialize(&self, buffer: &mut [u8]) -> Result<usize, Self::Error> {

@@ -49,15 +49,15 @@ fn main() {
             rand::thread_rng().gen_range(min_position.z..max_position.z),
         );
 
-        let mut test_samples = [0.0; 44100usize.next_multiple_of(32)];
+        let mut test_samples = [0.0; 4410usize.next_multiple_of(64)];
 
-        let freq1 = rand::thread_rng().gen_range(500.0..15000.0);
-        let freq2 = rand::thread_rng().gen_range(500.0..15000.0);
-        let freq3 = rand::thread_rng().gen_range(500.0..15000.0);
+        let freq1 = 4000.0; //rand::thread_rng().gen_range(500.0..15000.0);
+        let freq2 = 7000.0; //rand::thread_rng().gen_range(500.0..15000.0);
+        let freq3 = 13000.0; //rand::thread_rng().gen_range(500.0..15000.0);
 
-        add_signal(&mut test_samples[1000..2000], 1000, freq1, 1.0, 0.0);
-        add_signal(&mut test_samples[7000..15000], 7000, freq2, 1.0, 0.0);
-        add_signal(&mut test_samples[35100..40000], 35100, freq3, 1.0, 0.0);
+        add_signal(&mut test_samples[100..200], 100, freq1, 1.0, 0.0);
+        add_signal(&mut test_samples[700..1500], 700, freq2, 1.0, 0.0);
+        // add_signal(&mut test_samples[3510..4000], 3510, freq3, 1.0, 0.0);
 
         println!("Signal\n\tfreq1: {freq1:.1},\n\tfreq2: {freq2:.1},\n\tfreq3: {freq3:.1},\n\tlocation: {test_position}");
 
@@ -67,13 +67,15 @@ fn main() {
             let id = anchor.id;
 
             let mut test_samples = test_samples.clone();
-            add_random_noise(&mut test_samples, 0.01);
+            add_random_noise(&mut test_samples, 0.1);
 
             anchor.feed(
                 &test_samples,
                 test_position,
                 Timestamp::new(current_time.as_nanos() as u64, 0),
                 |payload| {
+                    // println!("{payload:?}");
+
                     let mut buffer = [0; 1024];
 
                     let len = payload.serialize(&mut buffer).unwrap();

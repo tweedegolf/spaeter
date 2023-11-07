@@ -14,8 +14,8 @@ services:
     working_dir: /app/server
     environment:
       MQTT: "mqtt://mqtt:1883?client_id=spaeter-server"
-      LOG: debug
       RUST_BACKTRACE: 1
+      RUST_LOG: "info"
     networks: [default]
     restart: unless-stopped
     tty: true

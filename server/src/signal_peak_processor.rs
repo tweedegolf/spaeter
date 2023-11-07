@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 
 use crate::{signal::Signal, signal_correlator::SignalCorrelator};
 
-const MAX_SIGNAL_FREQUENCY_DEVIATION: f32 = 400.0; // In hertz (depends on the fft accuracy)
+const MAX_SIGNAL_FREQUENCY_DEVIATION: f32 = 200.0; // In hertz (depends on the fft accuracy)
 
 pub struct SignalPeakProcessor {
     signals: Mutex<HashMap<AnchorId, Vec<Signal>>>,
@@ -31,9 +31,11 @@ impl SignalPeakProcessor {
 
         // Is there an existing signal we can add this peak to?
         let found_signal = anchor_signals.iter_mut().find(|signal| {
-            value.timestamp.difference_to(signal.end_time()) < Timestamp::from_millis(200)
+            value.timestamp.difference_to(signal.end_time()) < crate::PEAK_TO_SIGNAL_TIMEOUT
                 && (signal.average_frequency() - value.value.freq).abs()
                     <= MAX_SIGNAL_FREQUENCY_DEVIATION
+                && value.value.magnitude > signal.average_magnitude() * 0.5
+                && value.value.magnitude < signal.average_magnitude() * 1.5
         });
 
         match found_signal {
@@ -55,7 +57,7 @@ impl SignalPeakProcessor {
 
             for (anchor, signals) in signals.iter_mut() {
                 for finished_signal in signals.extract_if(|signal| {
-                    signal.end_time().difference_to(current_time) > Timestamp::from_millis(300)
+                    signal.end_time().difference_to(current_time) > crate::PEAK_TO_SIGNAL_TIMEOUT
                 }) {
                     tokio::spawn(
                         self.correlator

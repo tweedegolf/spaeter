@@ -43,53 +43,57 @@ fn main() {
             .reduce(Vec3::min)
             .unwrap();
 
-        let test_position = vec3(
-            rand::thread_rng().gen_range(min_position.x..max_position.x),
-            rand::thread_rng().gen_range(min_position.y..max_position.y),
-            rand::thread_rng().gen_range(min_position.z..max_position.z),
-        );
-
-        let mut test_samples = [0.0; 4410usize.next_multiple_of(64)];
-
-        let freq1 = 4000.0; //rand::thread_rng().gen_range(500.0..15000.0);
-        let freq2 = 7000.0; //rand::thread_rng().gen_range(500.0..15000.0);
-        let freq3 = 13000.0; //rand::thread_rng().gen_range(500.0..15000.0);
-
-        add_signal(&mut test_samples[100..200], 100, freq1, 1.0, 0.0);
-        add_signal(&mut test_samples[700..1500], 700, freq2, 1.0, 0.0);
-        // add_signal(&mut test_samples[3510..4000], 3510, freq3, 1.0, 0.0);
-
-        println!("Signal\n\tfreq1: {freq1:.1},\n\tfreq2: {freq2:.1},\n\tfreq3: {freq3:.1},\n\tlocation: {test_position}");
-
-        let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-
-        for anchor in fake_anchors.iter_mut() {
-            let id = anchor.id;
-
-            let mut test_samples = test_samples.clone();
-            add_random_noise(&mut test_samples, 0.1);
-
-            anchor.feed(
-                &test_samples,
-                test_position,
-                Timestamp::new(current_time.as_nanos() as u64, 0),
-                |payload| {
-                    // println!("{payload:?}");
-
-                    let mut buffer = [0; 1024];
-
-                    let len = payload.serialize(&mut buffer).unwrap();
-
-                    client
-                        .publish(
-                            signal_peak_topic(Some(id)).as_str(),
-                            QoS::ExactlyOnce,
-                            false,
-                            &buffer[..len],
-                        )
-                        .unwrap();
-                },
+        for _ in 0..10 {
+            let test_position = vec3(
+                rand::thread_rng().gen_range(min_position.x..max_position.x),
+                rand::thread_rng().gen_range(min_position.y..max_position.y),
+                rand::thread_rng().gen_range(min_position.z..max_position.z),
             );
+
+            let mut test_samples = [0.0; 4410usize.next_multiple_of(64)];
+
+            let freq1 = rand::thread_rng().gen_range(500.0..15000.0);
+            let freq2 = rand::thread_rng().gen_range(500.0..15000.0);
+            let freq3 = rand::thread_rng().gen_range(500.0..15000.0);
+
+            // add_signal(&mut test_samples[100..200], 100, freq1, 1.0, 0.0);
+            add_signal(&mut test_samples[700..1500], 700, freq2, 1.0, 0.0);
+            // add_signal(&mut test_samples[3510..4000], 3510, freq3, 1.0, 0.0);
+
+            println!("Signal\n\tfreq1: {freq1:.1},\n\tfreq2: {freq2:.1},\n\tfreq3: {freq3:.1},\n\tlocation: {test_position}");
+
+            let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+
+            for anchor in fake_anchors.iter_mut() {
+                let id = anchor.id;
+
+                let mut test_samples = test_samples.clone();
+                add_random_noise(&mut test_samples, 0.1);
+
+                anchor.feed(
+                    &test_samples,
+                    test_position,
+                    Timestamp::new(current_time.as_nanos() as u64, 0),
+                    |payload| {
+                        // println!("{payload:?}");
+
+                        let mut buffer = [0; 1024];
+
+                        let len = payload.serialize(&mut buffer).unwrap();
+
+                        client
+                            .publish(
+                                signal_peak_topic(Some(id)).as_str(),
+                                QoS::ExactlyOnce,
+                                false,
+                                &buffer[..len],
+                            )
+                            .unwrap();
+                    },
+                );
+            }
+
+            std::thread::sleep(Duration::from_secs_f32(0.5));
         }
     });
 

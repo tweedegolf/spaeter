@@ -4,12 +4,12 @@ location = [0.0, 0.0, 0.0]
 
 [[anchors]]
 id = 1
-location = [10.0, 0.0, 1.0]
+location = [10.0, 1.0, 0.0]
 
 [[anchors]]
 id = 2
-location = [0.0, 10.0, 0.0]
+location = [0.0, 0.0, 10.0]
 
 [[anchors]]
 id = 3
-location = [10.0, 10.0, 2.5]
+location = [10.0, 2.5, 10.0]

@@ -1,0 +1,17 @@
+[package]
+name = "spaeter-server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rumqttc = { version = "0.23.0", features = ["url"] }
+tokio = { version = "1.33.0", features = ["full"] }
+spaeter-core = { path = "../core"}
+signal-detector = { path = "../signal-detector" }
+futures-util = "0.3.29"
+tdoa-solver = { git = "https://github.com/tweedegolf/tdoa-solver.git" }
+glam = "0.24.2"
+log = "0.4"
+pretty_env_logger = "0.5.0"

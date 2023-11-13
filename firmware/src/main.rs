@@ -75,11 +75,6 @@ mod app {
     fn init(cx: init::Context) -> (Shared, Local) {
         let p = cx.device;
 
-        // Enable TIM2, ADC1 and DMA2 clocks
-        p.RCC.apb1enr.modify(|_, w| w.tim2en().enabled());
-        p.RCC.apb2enr.modify(|_, w| w.adc1en().enabled());
-        p.RCC.ahb1enr.modify(|_, w| w.dma2en().enabled());
-
         defmt::println!("HELLO!!O!O!");
 
         let mut rcc = p.RCC.constrain();

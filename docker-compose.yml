@@ -1,0 +1,36 @@
+version: '3.9'
+services:
+  server:
+    image: docker.tgrep.nl/docker/rust-dev:1.73
+    volumes:
+      - ./server:/app/server
+      - ./server-config.toml:/app/server-config.toml
+      - target:/app/server/target
+      - ./core:/app/core
+      - ./signal-detector:/app/signal-detector
+      - registry:/usr/local/cargo/registry
+      - git:/usr/local/cargo/git
+    command: [ "cargo", "watch", "-x", "run --release", "--poll" ]
+    working_dir: /app/server
+    environment:
+      MQTT: "mqtt://mqtt:1883?client_id=spaeter-server"
+      RUST_BACKTRACE: 1
+      RUST_LOG: "info"
+    networks: [default]
+    restart: unless-stopped
+    tty: true
+
+  mqtt:
+    image: bytebeamio/rumqttd
+    volumes:
+      - ./rumqttd.toml:/rumqttd.toml
+    ports: ["1883:1883", "1884:1884"]
+    networks: [default]
+
+networks:
+  default: ~
+
+volumes:
+  target: ~
+  registry: ~
+  git: ~

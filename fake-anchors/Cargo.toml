@@ -1,0 +1,13 @@
+[package]
+name = "spaeter-fake-anchors"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rumqttc = { version = "0.23.0", features = ["url"] }
+spaeter-core = { path = "../core"}
+signal-detector = { path = "../signal-detector" }
+glam = "0.24.2"
+rand = "0.8.5"

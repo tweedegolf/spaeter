@@ -237,14 +237,14 @@ fn send(
 ) -> Result<PacketId, udp::SendError> {
     net.lock(|net| {
         // Get an Id to track our packet
-        let packet_id = net.nal.device_mut().next_packet_id();
+        let packet_id = net.nal().device_mut().next_packet_id();
 
         // Combine the receiver with the packet id
         let mut meta: UdpMetadata = (*to).into();
         meta.meta = packet_id.clone().into();
-
+        defmt::println!("Sending stuff with meta: {:?}", defmt::Debug2Format(&meta));
         // Actually send the packet
-        net.nal.smoltcp_send_udp(&mut socket, data, meta)?;
+        net.nal().smoltcp_send_udp(&mut socket, data, meta)?;
 
         // Send out the packet, this makes sure the MAC actually sees the packet and
         // knows about the packet_id

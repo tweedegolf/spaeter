@@ -48,7 +48,7 @@ static_cell = "1.2.0"
 log-to-defmt = "0.1.0"
 adler = { version = "1.0.2", default-features = false }
 fugit = "0.3.7"
-minimq = "0.8.0"
+minimq = { path = "../../minimq" }
 smoltcp-nal = { path = "../../smoltcp-nal" }
 embedded-time = "0.12.1"
 

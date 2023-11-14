@@ -1,6 +1,8 @@
 version: '3.9'
 services:
   server:
+    depends_on:
+      - mqtt
     image: docker.tgrep.nl/docker/rust-dev:1.73
     volumes:
       - ./server:/app/server

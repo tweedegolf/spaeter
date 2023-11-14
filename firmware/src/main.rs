@@ -70,7 +70,8 @@ mod app {
     #[init(local = [
         dma_resources: DmaResources = DmaResources::new(),
         sockets: [SocketStorage<'static>; 8] = [SocketStorage::EMPTY; 8],
-        udp_resources: [UdpSocketResources; 2] = [UdpSocketResources::new(); 2]
+        udp_resources: [UdpSocketResources; 2] = [UdpSocketResources::new(); 2],
+        dma: core::cell::OnceCell<stm32_eth::dma::EthernetDMA<'static,'static> >  = core::cell::OnceCell::new(),
     ])]
     fn init(cx: init::Context) -> (Shared, Local) {
         let p = cx.device;
@@ -150,15 +151,16 @@ mod app {
         defmt::println!("Going to do scary stuff now");
 
         let adc_conversion_data = ADC_CONVERSION_DATA.init_with(|| core::array::from_fn(|_| 0));
-        let adc_capture = AdcCapture::init(
-            adc_conversion_data,
-            p.ADC1,
-            p.TIM2,
-            p.DMA2.st[0],
-            &mut rcc.apb1,
-            &mut rcc.apb2,
-            &mut rcc.ahb1,
-        );
+
+        // let adc_capture = AdcCapture::init(
+        //     adc_conversion_data,
+        //     p.ADC1,
+        //     p.TIM2,
+        //     p.DMA2,
+        //     &mut rcc.apb1,
+        //     &mut rcc.apb2,
+        //     &mut rcc.ahb1,
+        // );
         defmt::println!("👻");
 
         // Setup Ethernet
@@ -182,6 +184,9 @@ mod app {
             .ok())
         };
 
+        cx.local.dma.set(dma);
+        let dma = cx.local.dma.get_mut().unwrap();
+
         defmt::trace!("Enabling DMA interrupts");
         dma.enable_interrupt();
 
@@ -195,7 +200,7 @@ mod app {
         // Setup smoltcp as our network stack
         let mac_address = generate_mac_address();
         let (interface, mut sockets) =
-            crate::ethernet::setup_smoltcp(cx.local.sockets, &mut dma, mac_address);
+            crate::ethernet::setup_smoltcp(cx.local.sockets, dma, mac_address);
 
         // Create sockets
         let [tc_res, g_res] = cx.local.udp_resources;
@@ -203,18 +208,15 @@ mod app {
         let event_socket = crate::ethernet::setup_udp_socket(&mut sockets, tc_res, 319);
         let general_socket = crate::ethernet::setup_udp_socket(&mut sockets, g_res, 320);
 
-        // Setup DHCP
-        let dhcp_socket = crate::ethernet::setup_dhcp_socket(&mut sockets);
-
-        let net = NetworkStack {
-            dma,
-            iface: interface,
-            sockets,
-        };
+        // Setup DHCP. Smoltcp_nal should handle it when polled
+        let _dhcp_socket = crate::ethernet::setup_dhcp_socket(&mut sockets);
 
         // Setup statime
         let rng = p.RNG.init();
         let (ptp_instance, ptp_port, ptp_clock) = setup_statime(ptp, mac_address, rng);
+
+        // Setup network stack
+        let net = NetworkStack::new(dma, sockets, interface, ptp_clock);
 
         // Setup message channels
         type TimerMsg = (TimerName, core::time::Duration);
@@ -255,9 +257,8 @@ mod app {
             instance_bmca::spawn(ptp_instance)
                 .unwrap_or_else(|_| defmt::panic!("Failed to start instance bmca"));
 
-            // Poll network interfaces and run DHCP
+            // Poll network interfaces
             poll_smoltcp::spawn().unwrap_or_else(|_| defmt::panic!("Failed to start poll_smoltcp"));
-            // dhcp::spawn(dhcp_socket).unwrap_or_else(|_| defmt::panic!("Failed to start dhcp"));
         }
 
         (
@@ -377,7 +378,7 @@ mod app {
                 tx_waker.lock(|tx_waker| tx_waker.register(ctx.waker()));
 
                 // Keep polling as long as we have tries left
-                match net.lock(|net| net.dma.poll_tx_timestamp(&packet_id)) {
+                match net.lock(|net| net.nal.device().poll_tx_timestamp(&packet_id)) {
                     Poll::Ready(Ok(ts)) => Poll::Ready(ts),
                     Poll::Ready(Err(_)) | Poll::Pending => {
                         if tries > 0 {
@@ -539,8 +540,8 @@ mod app {
         //     lisr
         // );
 
-        let datum = unsafe { &ADC_CONVERSION_DATA[0][..16] };
-        let datum2 = unsafe { &ADC_CONVERSION_DATA[1][..16] };
+        // let datum = unsafe { &ADC_CONVERSION_DATA[0][..16] };
+        // let datum2 = unsafe { &ADC_CONVERSION_DATA[1][..16] };
         // defmt::println!("DMA2_STREAM0! {:?}", datum);
         // defmt::println!("DMA2_STREAM0! {:?}", datum2);
     }
@@ -593,53 +594,5 @@ mod app {
         cx.shared.net.lock(|net| {
             net.poll();
         });
-    }
-
-    /// Run a DHCP client to dynamically acquire an IP address
-    #[task(shared = [net], priority = 0)]
-    async fn dhcp(mut cx: dhcp::Context, dhcp_handle: SocketHandle) {
-        loop {
-            core::future::poll_fn(|ctx| {
-                cx.shared.net.lock(|net| {
-                    let dhcp_socket = net.sockets.get_mut::<dhcpv4::Socket>(dhcp_handle);
-                    dhcp_socket.register_waker(ctx.waker());
-
-                    match dhcp_socket.poll() {
-                        Some(dhcpv4::Event::Deconfigured) => {
-                            defmt::warn!("DHCP got deconfigured");
-                            net.iface.update_ip_addrs(|addrs| {
-                                let dest = unwrap!(addrs.iter_mut().next());
-                                *dest = IpCidr::Ipv4(Ipv4Cidr::new(Ipv4Address::UNSPECIFIED, 0));
-                            });
-                            net.iface.routes_mut().remove_default_ipv4_route();
-                            Poll::Pending
-                        }
-                        Some(dhcpv4::Event::Configured(config)) => {
-                            defmt::debug!("DHCP config acquired!");
-
-                            defmt::debug!("IP address:      {}", config.address);
-                            net.iface.update_ip_addrs(|addrs| {
-                                let dest = unwrap!(addrs.iter_mut().next());
-                                *dest = IpCidr::Ipv4(config.address);
-                            });
-                            if let Some(router) = config.router {
-                                defmt::debug!("Default gateway: {}", router);
-                                unwrap!(net.iface.routes_mut().add_default_ipv4_route(router));
-                            } else {
-                                defmt::debug!("Default gateway: None");
-                                net.iface.routes_mut().remove_default_ipv4_route();
-                            }
-
-                            for (i, s) in config.dns_servers.iter().enumerate() {
-                                defmt::debug!("DNS server {}:    {}", i, s);
-                            }
-                            Poll::Ready(())
-                        }
-                        None => Poll::Pending,
-                    }
-                })
-            })
-            .await;
-        }
     }
 }

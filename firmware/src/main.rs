@@ -49,6 +49,8 @@ defmt::timestamp!("{=u64:iso8601ms}", {
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
 
+    use minimq::Publication;
+
     use super::*;
 
     static ADC_CONVERSION_DATA: StaticCell<AdcCaptureBuffer> = StaticCell::new();
@@ -206,7 +208,7 @@ mod app {
         let general_socket = crate::ethernet::setup_udp_socket(&mut sockets, g_res, 320);
 
         // Setup DHCP. Smoltcp_nal should handle it when polled
-        let dhcp_socket = crate::ethernet::setup_dhcp_socket(&mut sockets);
+        // let dhcp_socket = crate::ethernet::setup_dhcp_socket(&mut sockets);
 
         // Setup TCP socket for MQTT
         let mqtt_res = cx.local.tcp_resources;
@@ -224,7 +226,7 @@ mod app {
             ptp_clock,
             cx.local.mq_buffer,
             mqtt_tcp_socket,
-            dhcp_socket,
+            // dhcp_socket,
         );
 
         // Setup message channels
@@ -270,7 +272,7 @@ mod app {
             poll_smoltcp::spawn().unwrap_or_else(|_| defmt::panic!("Failed to start poll_smoltcp"));
 
             // Poll mqtt client
-            // poll_mqtt::spawn().unwrap_or_else(|_| defmt::panic!("Failed to start poll_mqtt"));
+            poll_mqtt::spawn().unwrap_or_else(|_| defmt::panic!("Failed to start poll_mqtt"));
         }
 
         (
@@ -541,11 +543,14 @@ mod app {
     async fn poll_mqtt(mut cx: poll_mqtt::Context) {
         loop {
             let did_recv = cx.shared.net.lock(|net| {
-                if !net.mqtt.client().is_connected() {
-                    defmt::info!("Mqtt disconnecter! Retrying...");
-                } else {
-                    defmt::info!("MQTT connected! Polling...");
-                }
+                defmt::info!(
+                    "Polling MQTT. Connected: {}",
+                    net.mqtt
+                        .client()
+                        .is_connected()
+                        .then_some("✅")
+                        .unwrap_or("❌")
+                );
                 match net.mqtt.poll(|_, topic, payload, properties| {
                     defmt::info!(
                         "Received MQTT message. Topic: {}, payload: '{}', properties: {:?}",
@@ -566,7 +571,7 @@ mod app {
             }
         }
     }
-
+ 
     #[task(binds = DMA2_STREAM0, priority = 1)]
     fn on_dma2_stream0(mut cx: on_dma2_stream0::Context) {
         let dma2 = unsafe { &*pac::DMA2::ptr() };

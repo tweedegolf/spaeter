@@ -242,7 +242,7 @@ fn send(
         // Combine the receiver with the packet id
         let mut meta: UdpMetadata = (*to).into();
         meta.meta = packet_id.clone().into();
-        defmt::println!("Sending stuff with meta: {:?}", defmt::Debug2Format(&meta));
+
         // Actually send the packet
         net.nal().smoltcp_send_udp(&mut socket, data, meta)?;
 

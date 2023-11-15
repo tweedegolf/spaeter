@@ -96,7 +96,7 @@ impl NetworkStack {
         ptp_clock: &'static PtpClock,
         mq_buffer: &'static mut [u8],
         _mqtt_tcp_socket: SocketHandle,
-        _dhcp_socket: SocketHandle,
+        // _dhcp_socket: SocketHandle,
     ) -> Self {
         let nal_stack = smoltcp_nal::NetworkStack::new(interface, dma, sockets, ptp_clock);
 
@@ -110,7 +110,7 @@ impl NetworkStack {
             nal_stack,
             ptp_clock,
             minimq::ConfigBuilder::new(mq_broker_addr.into(), mq_buffer)
-                .client_id("spater")
+                .client_id("spaeter")
                 .unwrap(),
         );
 
@@ -228,7 +228,7 @@ pub fn setup_tcp_socket(
 
     let rx_buffer = tcp::SocketBuffer::new(&mut rx_payload_storage[..]);
     let tx_buffer = tcp::SocketBuffer::new(&mut tx_payload_storage[..]);
-    let mut socket = tcp::Socket::new(rx_buffer, tx_buffer);
+    let socket = tcp::Socket::new(rx_buffer, tx_buffer);
 
     socket_set.add(socket)
 }

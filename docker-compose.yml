@@ -15,7 +15,7 @@ services:
     command: [ "cargo", "watch", "-x", "run --release", "--poll" ]
     working_dir: /app/server
     environment:
-      MQTT: "mqtt://mqtt:1883?client_id=spaeter-server"
+      MQTT: "mqtt://mqtt:1884?client_id=spaeter-server"
       RUST_BACKTRACE: 1
       RUST_LOG: "info"
     networks: [default]
@@ -24,8 +24,9 @@ services:
 
   mqtt:
     image: bytebeamio/rumqttd
+    command: ["-v", "-c", "/rumqttd.toml"]
     volumes:
-      - ./rumqttd.toml:/rumqttd.toml
+      - ./rumqttd.toml:/rumqttd.toml:ro
     ports: ["1883:1883", "1884:1884"]
     networks: [default]
 

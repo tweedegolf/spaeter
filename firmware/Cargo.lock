@@ -500,6 +500,7 @@ checksum = "39617bc909d64b068dcffd0e3e31679195b5576d0c83fadc52690268cc2b2b55"
 [[package]]
 name = "minimq"
 version = "0.8.0"
+source = "git+https://github.com/tweedegolf/minimq.git#f7a3cad84b7bab2a429eda96401f65705c29d276"
 dependencies = [
  "bit_field",
  "embedded-nal",
@@ -880,6 +881,7 @@ dependencies = [
 [[package]]
 name = "smoltcp-nal"
 version = "0.4.1"
+source = "git+https://github.com/tweedegolf/smoltcp-nal.git#a71e24d34451d0baf1d0f9532243c21d03f5cbf6"
 dependencies = [
  "embedded-nal",
  "embedded-time",

@@ -48,8 +48,8 @@ static_cell = "1.2.0"
 log-to-defmt = "0.1.0"
 adler = { version = "1.0.2", default-features = false }
 fugit = "0.3.7"
-minimq = { path = "../../minimq" }
-smoltcp-nal = { path = "../../smoltcp-nal" }
+minimq = { git = "https://github.com/tweedegolf/minimq.git" }
+smoltcp-nal = { git = "https://github.com/tweedegolf/smoltcp-nal.git" }
 embedded-time = "0.12.1"
 
 [profile.release]

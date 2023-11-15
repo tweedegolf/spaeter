@@ -571,7 +571,7 @@ mod app {
             }
         }
     }
- 
+
     #[task(binds = DMA2_STREAM0, priority = 1)]
     fn on_dma2_stream0(mut cx: on_dma2_stream0::Context) {
         let dma2 = unsafe { &*pac::DMA2::ptr() };

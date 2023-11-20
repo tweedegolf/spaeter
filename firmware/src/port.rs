@@ -231,22 +231,20 @@ impl PortState {
 
 fn send(
     net: &mut impl Mutex<T = NetworkStack>,
-    socket: SocketHandle,
+    mut socket: SocketHandle,
     to: &smoltcp::wire::IpEndpoint,
     data: &[u8],
 ) -> Result<PacketId, udp::SendError> {
     net.lock(|net| {
         // Get an Id to track our packet
-        let packet_id = net.dma.next_packet_id();
+        let packet_id = net.nal().device_mut().next_packet_id();
 
         // Combine the receiver with the packet id
         let mut meta: UdpMetadata = (*to).into();
         meta.meta = packet_id.clone().into();
 
         // Actually send the packet
-        net.sockets
-            .get_mut::<udp::Socket>(socket)
-            .send_slice(data, meta)?;
+        net.nal().smoltcp_send_udp(&mut socket, data, meta)?;
 
         // Send out the packet, this makes sure the MAC actually sees the packet and
         // knows about the packet_id
@@ -260,7 +258,11 @@ pub fn setup_statime(
     ptp_peripheral: stm32_eth::ptp::EthernetPTP,
     mac_address: [u8; 6],
     rng: Rng,
-) -> (&'static PtpInstance<BasicFilter>, StmPort<InBmca<'static>>, &'static PtpClock) {
+) -> (
+    &'static PtpInstance<BasicFilter>,
+    StmPort<InBmca<'static>>,
+    &'static PtpClock,
+) {
     static PTP_CLOCK: StaticCell<PtpClock> = StaticCell::new();
     let ptp_clock = &*PTP_CLOCK.init(PtpClock::new(ptp_peripheral));
 

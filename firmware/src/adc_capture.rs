@@ -1,4 +1,7 @@
-use core::{ops::{Range, RangeTo, RangeFrom}, cmp::Ordering};
+use core::{
+    cmp::Ordering,
+    ops::{Range, RangeFrom, RangeTo},
+};
 
 use hal::{
     pac,
@@ -25,41 +28,47 @@ struct DoubleBufferedRingBuffer {
 impl DoubleBufferedRingBuffer {
     fn new(buffer: &'static mut AdcCaptureBuffer) -> DoubleBufferedRingBuffer {
         Self {
-            buffer,
             app_range: RingRange::Empty,
             free_range: RingRange::Normal(0..buffer.len()),
+            buffer,
         }
     }
 
     fn next_dma_buffer(&mut self) -> Option<&mut [u16; AdcCapture::CONVS_PER_CHUNK]> {
-        let (new_range, dma_range) = match self.free_range {
+        let (new_range, dma_range) = match &self.free_range {
             RingRange::Empty => return None,
             RingRange::Normal(range) => {
                 let new_start = range.start + AdcCapture::CONVS_PER_CHUNK;
                 match new_start.cmp(&range.end) {
-                    Ordering::Less => (RingRange::Normal(new_start..range.end), range.start..new_start),
-                    Ordering::Equal => (RingRange::Empty, range),
+                    Ordering::Less => (
+                        RingRange::Normal(new_start..range.end),
+                        range.start..new_start,
+                    ),
+                    Ordering::Equal => (RingRange::Empty, range.clone()),
                     Ordering::Greater => return None,
                 }
-            },
+            }
             RingRange::Wrapped(morning, afternoon) => {
                 let new_start = morning.start + AdcCapture::CONVS_PER_CHUNK;
                 match new_start.cmp(&self.buffer.len()) {
-                    Ordering::Less => (RingRange::Wrapped(new_start.., afternoon), morning.start..new_start),
+                    Ordering::Less => (RingRange::Wrapped(new_start.., afternoon.clone()), morning.start..new_start),
                     Ordering::Equal =>  (RingRange::Normal(0..afternoon.end), morning.start..self.buffer.len()),
                     Ordering::Greater => unreachable!("morning.start was already bigger the length or the length as not divisible by CONVS_PER_CHUNK"),
                 }
-            },
+            }
         };
 
         self.free_range = new_range;
-        let dma_buffer = &mut self.buffer[dma_range].try_into().expect("dma_range is always CONVS_PER_CHUNK long");
+        todo!()
+        // let dma_buffer = &mut self.buffer[dma_range]
+        //     .try_into()
+        //     .expect("dma_range is always CONVS_PER_CHUNK long");
 
-        Some(dma_buffer)
+        // Some(dma_buffer)
     }
 
     fn app_release(&mut self, num_bytes: usize) {
-        let (new_app_range, released_range) = match self.app_range {
+        let (new_app_range, released_range) = match &self.app_range {
             RingRange::Empty => panic!("Released bytes while not owning any!"),
             RingRange::Normal(app) => {
                 let new_start = app.start + num_bytes;
@@ -67,23 +76,41 @@ impl DoubleBufferedRingBuffer {
                     panic!("Released more bytes then you owned");
                 }
 
-                (RingRange::Normal(new_start..app.end), RingRange::Normal(app.start..new_start))
-            },
+                (
+                    RingRange::Normal(new_start..app.end),
+                    RingRange::Normal(app.start..new_start),
+                )
+            }
             RingRange::Wrapped(morning, afternoon) => {
                 let new_start = morning.start + num_bytes;
                 match new_start.cmp(&self.buffer.len()) {
-                    Ordering::Less => (RingRange::Wrapped(new_start.., afternoon), RingRange::Normal(morning.start..new_start)),
-                    Ordering::Equal => (RingRange::Normal(0..afternoon.end), RingRange::Normal(morning.start..self.buffer.len())),
+                    Ordering::Less => (
+                        RingRange::Wrapped(new_start.., afternoon.clone()),
+                        RingRange::Normal(morning.start..new_start),
+                    ),
+                    Ordering::Equal => (
+                        RingRange::Normal(0..afternoon.end),
+                        RingRange::Normal(morning.start..self.buffer.len()),
+                    ),
                     Ordering::Greater => {
                         if num_bytes > self.buffer.len() + morning.start {
                             // TODO somewhere here should also be a new_range EMPTY
-                            (RingRange::Normal((new_start % self.buffer.len())..afternoon.end), RingRange::Wrapped(morning, ..(new_start % self.buffer.len())))
+                            (
+                                RingRange::Normal((new_start % self.buffer.len())..afternoon.end),
+                                RingRange::Wrapped(
+                                    morning.clone(),
+                                    ..(new_start % self.buffer.len()),
+                                ),
+                            )
                         } else {
-                            (RingRange::Normal(0..afternoon.end), RingRange::Normal(morning.start..self.buffer.len()))
+                            (
+                                RingRange::Normal(0..afternoon.end),
+                                RingRange::Normal(morning.start..self.buffer.len()),
+                            )
                         }
-                    },
+                    }
                 }
-            },
+            }
         };
 
         self.app_range = new_app_range;
@@ -95,7 +122,7 @@ impl DoubleBufferedRingBuffer {
 pub struct AdcCapture {
     adc1: pac::ADC1,
     tim2: pac::TIM2,
-    dma2_stream0: Dma2Stream,
+    dma2: pac::DMA2,
     buffer: DoubleBufferedRingBuffer,
 }
 
@@ -106,7 +133,7 @@ impl AdcCapture {
         buffer: &'static mut AdcCaptureBuffer,
         adc1: pac::ADC1,
         tim2: pac::TIM2,
-        dma2_stream0: Dma2Stream,
+        dma2: pac::DMA2,
         apb1: &mut rcc::APB1,
         apb2: &mut rcc::APB2,
         ahb1: &mut rcc::AHB1,
@@ -116,7 +143,7 @@ impl AdcCapture {
         let mut this = Self {
             adc1,
             tim2,
-            dma2_stream0,
+            dma2,
             buffer: DoubleBufferedRingBuffer::new(buffer),
         };
 
@@ -131,7 +158,7 @@ impl AdcCapture {
     /// and write them into ADC_CONVERSION_DATA
     /// in double-buffer mode
     fn init_dma2(&mut self, ahb1: &mut rcc::AHB1) {
-        let dma2_stream0 = self.dma2_stream0;
+        let dma2_stream0 = &self.dma2.st[0];
         <pac::DMA2 as Enable>::enable(ahb1);
         // Disable DMA2 Stream 0
         dma2_stream0.cr.modify(|_, w| w.en().disabled());
@@ -208,7 +235,7 @@ impl AdcCapture {
     /// single conversion mode and to be triggered externally from TIM2 TRGO
     /// and read out using DMA
     fn init_adc1(&mut self, apb2: &mut APB2) {
-        let adc1 = self.adc1;
+        let adc1 = &self.adc1;
         <pac::ADC1 as Enable>::enable(apb2);
         // Power down ADC1
         adc1.cr2.modify(|_, w| w.adon().clear_bit());
@@ -242,7 +269,7 @@ impl AdcCapture {
 
     /// Setup TIM2 to trigger ADC1 using TRGO on update event generation
     fn init_tim2(&mut self, apb1: &mut rcc::APB1) {
-        let tim2 = self.tim2;
+        let tim2 = &self.tim2;
         <pac::TIM2 as Enable>::enable(apb1);
         // Set Master mode trigger on timer enable, which will enable ADC1 as well
         tim2.cr2.modify(|_, w| w.mms().enable());

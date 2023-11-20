@@ -2,6 +2,7 @@ use core::cell::RefCell;
 
 use az::{Cast, SaturatingCast};
 use critical_section::Mutex;
+use embedded_time::{rate::Fraction, Instant};
 use fixed::types::{I33F31, U96F32};
 use stm32_eth::ptp::{EthernetPTP, Timestamp};
 
@@ -72,5 +73,17 @@ impl statime::Clock for &PtpClock {
         _time_properties_ds: &statime::TimePropertiesDS,
     ) -> Result<(), Self::Error> {
         Ok(())
+    }
+}
+
+impl embedded_time::Clock for &PtpClock {
+    type T = u32;
+
+    const SCALING_FACTOR: embedded_time::rate::Fraction = Fraction::new(1, 1000);
+
+    fn try_now(&self) -> Result<embedded_time::Instant<Self>, embedded_time::clock::Error> {
+        let nanos = <Self as statime::Clock>::now(self).nanos();
+        let millis = nanos / 1_000_000;
+        Ok(Instant::new(millis.to_num()))
     }
 }

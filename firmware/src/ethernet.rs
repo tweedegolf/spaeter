@@ -6,11 +6,16 @@ use ieee802_3_miim::{
     phy::{PhySpeed, LAN8742A},
     Phy,
 };
+use minimq::{
+    broker::IpBroker,
+    embedded_nal::{self, UdpClientStack},
+    Minimq,
+};
 use rtic::Mutex;
 use rtic_monotonics::{systick::Systick, Monotonic};
 use smoltcp::{
     iface::{Config, Interface, SocketHandle, SocketSet, SocketStorage},
-    socket::{dhcpv4, udp},
+    socket::{dhcpv4, tcp, udp},
     wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address},
 };
 use stm32_eth::{
@@ -20,6 +25,8 @@ use stm32_eth::{
     ptp::Timestamp,
 };
 use stm32f7xx_hal::signature::Uid;
+
+use crate::ptp_clock::PtpClock;
 
 pub struct DmaResources {
     pub rx_ring: [RxRingEntry; 2],
@@ -54,20 +61,72 @@ impl UdpSocketResources {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct TcpSocketResources {
+    pub rx_payload_storage: [u8; 8192],
+    pub tx_payload_storage: [u8; 8192],
+}
+
+impl TcpSocketResources {
+    pub const fn new() -> Self {
+        Self {
+            rx_payload_storage: [0; 8192],
+            tx_payload_storage: [0; 8192],
+        }
+    }
+}
+
+pub type Nal = smoltcp_nal::NetworkStack<
+    'static,
+    &'static mut EthernetDMA<'static, 'static>,
+    &'static crate::ptp_clock::PtpClock,
+>;
+
+pub type MiniMq = Minimq<'static, Nal, &'static PtpClock, IpBroker>;
+
 pub struct NetworkStack {
-    pub dma: EthernetDMA<'static, 'static>,
-    pub iface: Interface,
-    pub sockets: SocketSet<'static>,
+    pub mqtt: MiniMq,
 }
 
 impl NetworkStack {
+    pub fn new(
+        dma: &'static mut EthernetDMA<'static, 'static>,
+        sockets: SocketSet<'static>,
+        interface: Interface,
+        ptp_clock: &'static PtpClock,
+        mq_buffer: &'static mut [u8],
+        _mqtt_tcp_socket: SocketHandle,
+        // _dhcp_socket: SocketHandle,
+    ) -> Self {
+        let nal_stack = smoltcp_nal::NetworkStack::new(interface, dma, sockets, ptp_clock);
+
+        let mq_broker_addr = embedded_nal::IpAddr::V4(embedded_nal::Ipv4Addr::new(10, 0, 0, 1));
+        let mqtt: Minimq<
+            '_,
+            smoltcp_nal::NetworkStack<'_, &mut EthernetDMA<'_, '_>, &PtpClock>,
+            &PtpClock,
+            _,
+        > = Minimq::new(
+            nal_stack,
+            ptp_clock,
+            minimq::ConfigBuilder::new(mq_broker_addr.into(), mq_buffer)
+                .client_id("spaeter")
+                .unwrap(),
+        );
+
+        Self { mqtt }
+    }
+
+    pub fn nal(&mut self) -> &mut Nal {
+        self.mqtt.client().stack_mut()
+    }
+
     pub fn poll(&mut self) {
-        self.iface
-            .poll(now(), &mut &mut self.dma, &mut self.sockets);
+        self.nal().poll().unwrap();
     }
 
     pub fn poll_delay(&mut self) -> Option<smoltcp::time::Duration> {
-        self.iface.poll_delay(now(), &self.sockets)
+        self.nal().smoltcp_poll_delay(now())
     }
 }
 
@@ -158,6 +217,22 @@ pub fn setup_udp_socket(
     socket_set.add(socket)
 }
 
+pub fn setup_tcp_socket(
+    socket_set: &mut SocketSet,
+    resources: &'static mut TcpSocketResources,
+) -> SocketHandle {
+    let TcpSocketResources {
+        rx_payload_storage,
+        tx_payload_storage,
+    } = resources;
+
+    let rx_buffer = tcp::SocketBuffer::new(&mut rx_payload_storage[..]);
+    let tx_buffer = tcp::SocketBuffer::new(&mut tx_payload_storage[..]);
+    let socket = tcp::Socket::new(rx_buffer, tx_buffer);
+
+    socket_set.add(socket)
+}
+
 pub fn setup_dhcp_socket(socket_set: &mut SocketSet) -> SocketHandle {
     let dhcp_socket = dhcpv4::Socket::new();
     socket_set.add(dhcp_socket)
@@ -165,19 +240,17 @@ pub fn setup_dhcp_socket(socket_set: &mut SocketSet) -> SocketHandle {
 
 pub async fn recv_slice(
     net: &mut impl Mutex<T = NetworkStack>,
-    socket: SocketHandle,
+    mut socket: SocketHandle,
     buffer: &mut [u8],
 ) -> Result<(usize, Timestamp), RecvError> {
     poll_fn(|cx| {
         let result = net.lock(|net| {
             // Get next packet (if any)
-            let socket: &mut udp::Socket = net.sockets.get_mut(socket);
-            socket.register_recv_waker(cx.waker());
-            let (len, meta) = socket.recv_slice(buffer)?;
 
+            let (len, meta) = net.nal().smoltcp_recv_udp(&mut socket, buffer)?;
             // Get the timestamp
             let packet_id = PacketId::from(meta.meta);
-            let timestamp = match net.dma.rx_timestamp(&packet_id) {
+            let timestamp = match net.nal().device().rx_timestamp(&packet_id) {
                 Ok(Some(ts)) => ts,
                 Ok(None) => return Err(RecvError::NoTimestampRecorded),
                 Err(e) => return Err(e.into()),

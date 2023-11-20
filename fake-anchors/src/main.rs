@@ -97,7 +97,7 @@ fn main() {
         }
     });
 
-    while let Ok(_) = connection.recv_timeout(Duration::from_millis(500)) {}
+    while let Ok(_) = connection.recv_timeout(Duration::from_millis(600)) {}
 }
 
 struct FakeAnchor {

@@ -1,9 +1,11 @@
+#![cfg_attr(not(test), no_std)]
 #![feature(iter_map_windows)]
 
+use core::ops::Div;
 use fixed::types::I96F32;
 use fugit::HertzU32;
+use libm::{ceil, pow, sqrt};
 use statime::Time;
-use std::ops::Div;
 
 #[derive(Copy, Clone, Debug, defmt::Format, Eq, PartialEq)]
 pub struct SampleIndex(pub u64);
@@ -106,12 +108,12 @@ impl TimerObservations {
             .map_windows(Self::rate)
             .map(|rate| {
                 let rate = rate.to_Hz() as f64;
-                (rate - avg).powi(2)
+                pow(rate - avg, 2.0)
             })
             .sum::<f64>()
             .div(self.obs.len() as f64 - 1.0);
 
-        Some(HertzU32::Hz(squared_error.sqrt().ceil() as _))
+        Some(HertzU32::Hz(ceil(sqrt(squared_error)) as _))
     }
 
     pub fn timer_start(&self) -> Option<statime::Time> {
@@ -154,12 +156,12 @@ impl TimerObservations {
                 let should = self.to_timestamp(timer).unwrap();
                 let diff = should - time;
 
-                diff.seconds().powi(2)
+                pow(diff.seconds(), 2.0)
             })
             .sum::<f64>()
             .div(self.obs.len() as f64);
 
-        let error = squared_error.sqrt();
+        let error = sqrt(squared_error);
         let error = error / 1.07026154578459; // Magic correction factor -- determined by experiment
         Some(statime::Duration::from_seconds(error))
     }

@@ -10,6 +10,7 @@ defmt = "0.3.5"
 fugit = "0.3.7"
 heapless = "0.8.0"
 fixed = "1.24.0"
+libm = "0.2.8"
 statime = { git = "https://github.com/pendulum-project/statime.git", default-features = false }
 
 [dev-dependencies]

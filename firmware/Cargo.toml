@@ -52,6 +52,8 @@ minimq = { git = "https://github.com/tweedegolf/minimq.git" }
 smoltcp-nal = { git = "https://github.com/tweedegolf/smoltcp-nal.git" }
 embedded-time = "0.12.1"
 
+timing-conversions = { path = "../timing-conversions" }
+
 [profile.release]
 debug = 2
 lto = "fat"

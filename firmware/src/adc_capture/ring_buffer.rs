@@ -1,4 +1,5 @@
 use super::{AdcCapture, AdcCaptureBuffer, CAPTURE_LEN};
+use crate::timing::SampleIndex;
 use core::ops::{Deref, DerefMut};
 use core::slice;
 
@@ -91,6 +92,7 @@ pub struct DoubleBufferedRingBuffer {
     app_owned: RingSlice,
     dma_owned: RingSlice,
     free: RingSlice,
+    first_idx: SampleIndex,
     buffer: *mut u16,
 }
 
@@ -104,6 +106,7 @@ impl DoubleBufferedRingBuffer {
                 start: 0,
                 len: buffer.len(),
             },
+            first_idx: SampleIndex(0),
             buffer: buffer.as_mut_ptr(),
         }
     }
@@ -146,6 +149,10 @@ impl DoubleBufferedRingBuffer {
         assert!(self.is_consistend());
     }
 
+    pub fn first_idx(&self) -> SampleIndex {
+        self.first_idx
+    }
+
     pub fn app_data(&self) -> (&[u16], &[u16]) {
         assert!(self.is_consistend());
 
@@ -178,6 +185,7 @@ impl DoubleBufferedRingBuffer {
         let len = usize::min(len, self.app_owned.len);
         let grant = self.app_owned.pop_front(len).unwrap();
         self.free.push_back(grant);
+        self.first_idx.0 = self.first_idx.0.wrapping_add(len as u64);
         assert!(self.is_consistend());
     }
 }
@@ -222,16 +230,19 @@ mod tests {
 
         b.dma_done(dma_slice0.join().unwrap());
         assert!(matches!(b.app_data(), (&[0, 1, ..], &[]))); // Read while 1 is writing
+        assert_eq!(b.first_idx(), SampleIndex(0));
 
         b.dma_done(dma_slice1.join().unwrap());
         let app = b.app_data();
         assert_eq!(app.0.len(), 2 * AdcCapture::CONVS_PER_CHUNK);
         assert_eq!(app.1.len(), 0);
+        assert_eq!(b.first_idx(), SampleIndex(0));
 
         b.app_done(AdcCapture::CONVS_PER_CHUNK);
         let app = b.app_data();
         assert_eq!(app.0.len(), AdcCapture::CONVS_PER_CHUNK);
         assert_eq!(app.1.len(), 0);
+        assert_eq!(b.first_idx(), SampleIndex(AdcCapture::CONVS_PER_CHUNK as _));
 
         b.app_done(AdcCapture::CONVS_PER_CHUNK);
         assert_eq!(b.app_data(), EMPTY);
@@ -270,5 +281,10 @@ mod tests {
             b.app_done(1);
         }
         assert_eq!(b.free.len, b.len());
+
+        assert_eq!(
+            b.first_idx(),
+            SampleIndex(2 * AdcCapture::CONVS_PER_CHUNK as u64 + CAPTURE_LEN as u64)
+        );
     }
 }

@@ -6,6 +6,7 @@ use hal::{
 };
 use stm32f7xx_hal as hal;
 
+use super::timing::SampleIndex;
 use ring_buffer::{DmaGrant, DoubleBufferedRingBuffer};
 
 pub type Dma2Stream = pac::dma2::ST;
@@ -207,6 +208,7 @@ impl AdcCapture {
         let hisr = self.dma2.hisr.read();
         self.dma2.hifcr.write(|w| unsafe { w.bits(hisr.bits()) });
 
+        // Fetch status
         let stream0 = &self.dma2.st[0];
         let current_transfer = stream0.cr.read().ct();
 
@@ -248,5 +250,13 @@ impl AdcCapture {
             self.buffer.dma_done(old);
             self.next_done = StreamMemoryBank::Bank1
         }
+    }
+
+    pub fn data_buffer(&self) -> (SampleIndex, (&[u16], &[u16])) {
+        (self.buffer.first_idx(), self.buffer.app_data())
+    }
+
+    pub fn release_data(&mut self, num_samples: usize) {
+        self.buffer.app_done(num_samples);
     }
 }

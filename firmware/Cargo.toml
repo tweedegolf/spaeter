@@ -44,6 +44,7 @@ futures = { version = "0.3.28", default-features = false, features = [
 statime = { git = "https://github.com/pendulum-project/statime.git", default-features = false }
 fixed = "1.23.1"
 az = "1.2"
+libm = "0.2.8"
 static_cell = "1.2.0"
 log-to-defmt = "0.1.0"
 adler = { version = "1.0.2", default-features = false }
@@ -51,8 +52,11 @@ fugit = "0.3.7"
 minimq = { git = "https://github.com/tweedegolf/minimq.git" }
 smoltcp-nal = { git = "https://github.com/tweedegolf/smoltcp-nal.git" }
 embedded-time = "0.12.1"
+heapless = "0.8.0"
 
-timing-conversions = { path = "../timing-conversions" }
+[dev-dependencies]
+rand = "0.8.5"
+rand_distr = "0.4.3"
 
 [profile.release]
 debug = 2

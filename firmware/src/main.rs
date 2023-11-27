@@ -43,6 +43,13 @@ defmt::timestamp!("{=u64:iso8601ms}", {
     time.seconds() as u64 * 1_000 + (time.subseconds().nanos() / 1000000) as u64
 });
 
+#[cfg(test)]
+#[no_mangle]
+fn main() -> ! {
+    unreachable!()
+}
+
+#[cfg(not(test))]
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
     use super::*;

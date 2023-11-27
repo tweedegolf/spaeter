@@ -1,6 +1,3 @@
-#![cfg_attr(not(test), no_std)]
-#![feature(iter_map_windows)]
-
 use core::ops::Div;
 use fixed::types::I96F32;
 use fugit::HertzU32;

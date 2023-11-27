@@ -41,7 +41,7 @@ futures = { version = "0.3.28", default-features = false, features = [
     "async-await",
 ] }
 
-statime = "0.1.0"
+statime = { version = "0.1.0", default-features = false }
 fixed = "1.23.1"
 az = "1.2"
 libm = "0.2.8"

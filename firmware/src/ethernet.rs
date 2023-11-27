@@ -6,11 +6,7 @@ use ieee802_3_miim::{
     phy::{PhySpeed, LAN8742A},
     Phy,
 };
-use minimq::{
-    broker::IpBroker,
-    embedded_nal::{self, UdpClientStack},
-    Minimq,
-};
+use minimq::{broker::IpBroker, embedded_nal, Minimq};
 use rtic::Mutex;
 use rtic_monotonics::{systick::Systick, Monotonic};
 use smoltcp::{
@@ -299,7 +295,7 @@ pub fn generate_mac_address() -> [u8; 6] {
     let mut hasher = adler::Adler32::new();
 
     // Form the basis of our OUI octets
-    let bin_name = env!("CARGO_BIN_NAME").as_bytes();
+    let bin_name = env!("CARGO_CRATE_NAME").as_bytes();
     hasher.write_slice(bin_name);
     let oui = hasher.checksum().to_ne_bytes();
 

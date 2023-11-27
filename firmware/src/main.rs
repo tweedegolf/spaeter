@@ -9,7 +9,6 @@ use core::{pin::pin, task::Poll};
 use defmt::unwrap;
 use defmt_rtt as _;
 use embassy_sync::waitqueue::WakerRegistration;
-use ethernet::{DmaResources, NetworkStack};
 use futures::future::FutureExt;
 use panic_probe as _;
 use rtic::{app, Mutex};
@@ -24,11 +23,14 @@ use stm32f7xx_hal::{
     rng::RngExt,
 };
 
-use crate::{adc_capture::AdcCaptureBuffer, port::TimerName, ptp_clock::PtpClock};
-use crate::{
-    ethernet::{generate_mac_address, recv_slice, TcpSocketResources, UdpSocketResources},
-    port::setup_statime,
-    ptp_clock::stm_time_to_statime,
+use spaeter_firmware::{
+    adc_capture::AdcCaptureBuffer,
+    ethernet::{
+        self, generate_mac_address, recv_slice, DmaResources, NetworkStack, TcpSocketResources,
+        UdpSocketResources,
+    },
+    port::{self, setup_statime, TimerName},
+    ptp_clock::{stm_time_to_statime, PtpClock},
 };
 
 use defmt::Debug2Format;
@@ -36,21 +38,20 @@ use static_cell::StaticCell;
 use stm32_eth::ptp::{EthernetPTP, Subseconds, Timestamp};
 use stm32f7xx_hal::pac;
 
-mod adc_capture;
-mod ethernet;
-mod port;
-mod ptp_clock;
-
 defmt::timestamp!("{=u64:iso8601ms}", {
     let time = stm32_eth::ptp::EthernetPTP::get_time();
     time.seconds() as u64 * 1_000 + (time.subseconds().nanos() / 1000000) as u64
 });
 
+#[cfg(test)]
+#[no_mangle]
+fn main() -> ! {
+    unreachable!()
+}
+
+#[cfg(not(test))]
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
-
-    use minimq::Publication;
-
     use super::*;
 
     static ADC_CONVERSION_DATA: StaticCell<AdcCaptureBuffer> = StaticCell::new();
@@ -194,25 +195,24 @@ mod app {
         ptp.set_pps_freq(4);
 
         // Setup PHY
-        crate::ethernet::setup_phy(mac);
+        ethernet::setup_phy(mac);
 
         // Setup smoltcp as our network stack
         let mac_address = generate_mac_address();
-        let (interface, mut sockets) =
-            crate::ethernet::setup_smoltcp(cx.local.sockets, dma, mac_address);
+        let (interface, mut sockets) = ethernet::setup_smoltcp(cx.local.sockets, dma, mac_address);
 
         // Create sockets
         let [tc_res, g_res] = cx.local.udp_resources;
 
-        let event_socket = crate::ethernet::setup_udp_socket(&mut sockets, tc_res, 319);
-        let general_socket = crate::ethernet::setup_udp_socket(&mut sockets, g_res, 320);
+        let event_socket = ethernet::setup_udp_socket(&mut sockets, tc_res, 319);
+        let general_socket = ethernet::setup_udp_socket(&mut sockets, g_res, 320);
 
         // Setup DHCP. Smoltcp_nal should handle it when polled
         // let dhcp_socket = crate::ethernet::setup_dhcp_socket(&mut sockets);
 
         // Setup TCP socket for MQTT
         let mqtt_res = cx.local.tcp_resources;
-        let mqtt_tcp_socket = crate::ethernet::setup_tcp_socket(&mut sockets, mqtt_res);
+        let mqtt_tcp_socket = ethernet::setup_tcp_socket(&mut sockets, mqtt_res);
 
         // Setup statime
         let rng = p.RNG.init();

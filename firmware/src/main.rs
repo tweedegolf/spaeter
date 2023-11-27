@@ -1,8 +1,6 @@
 #![no_main]
 #![no_std]
 #![feature(type_alias_impl_trait)]
-// This lint produces false positives in this project with the nightly-2023-09-19 compiler
-#![allow(clippy::needless_pass_by_ref_mut)]
 
 use core::{pin::pin, task::Poll};
 

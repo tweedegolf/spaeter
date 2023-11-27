@@ -6,7 +6,7 @@ use hal::{
 };
 use stm32f7xx_hal as hal;
 
-use ring_buffer::DoubleBufferedRingBuffer;
+use ring_buffer::{DmaGrant, DoubleBufferedRingBuffer};
 
 pub type Dma2Stream = pac::dma2::ST;
 
@@ -14,11 +14,17 @@ const CAPTURE_LEN: usize = AdcCapture::CONVS_PER_CHUNK * AdcCapture::BUF_NUM_CHU
 
 pub type AdcCaptureBuffer = [u16; CAPTURE_LEN];
 
+enum StreamMemoryBank {
+    Bank0,
+    Bank1,
+}
+
 pub struct AdcCapture {
     adc1: pac::ADC1,
     tim2: pac::TIM2,
     dma2: pac::DMA2,
     buffer: DoubleBufferedRingBuffer,
+    next_done: StreamMemoryBank,
 }
 
 impl AdcCapture {
@@ -38,6 +44,7 @@ impl AdcCapture {
             tim2,
             dma2,
             buffer: DoubleBufferedRingBuffer::new(buffer),
+            next_done: StreamMemoryBank::Bank0,
         };
 
         this.init_dma2(ahb1);
@@ -190,5 +197,56 @@ impl AdcCapture {
 
         // Enable CC1
         tim2.ccer.modify(|_, w| w.cc1e().set_bit());
+    }
+
+    pub fn dma_interrupt_handler(&mut self) {
+        // Reset interrupt flag
+        let lisr = self.dma2.lisr.read();
+        self.dma2.lifcr.write(|w| unsafe { w.bits(lisr.bits()) });
+
+        let hisr = self.dma2.hisr.read();
+        self.dma2.hifcr.write(|w| unsafe { w.bits(hisr.bits()) });
+
+        let stream0 = &self.dma2.st[0];
+        let current_transfer = stream0.cr.read().ct();
+
+        // Check if we hit an error
+        if lisr.teif0().is_error() || lisr.dmeif0().is_error() || lisr.feif0().is_error() {
+            panic!("DMA error on stream 0");
+        }
+        if lisr.teif1().is_error()
+            || lisr.dmeif1().is_error()
+            || lisr.feif1().is_error()
+            || lisr.teif2().is_error()
+            || lisr.dmeif2().is_error()
+            || lisr.feif2().is_error()
+            || lisr.teif3().is_error()
+            || lisr.dmeif3().is_error()
+            || lisr.feif3().is_error()
+            || hisr.bits() != 0
+        {
+            panic!("DMA error on some stream >0");
+        }
+
+        // ADC transfer is done
+        if lisr.tcif0().is_complete() {
+            let memory_reg = match (&self.next_done, current_transfer.is_memory0()) {
+                (StreamMemoryBank::Bank0, true) => stream0.m0ar.as_ptr(),
+                (StreamMemoryBank::Bank1, false) => stream0.m1ar.as_ptr(),
+                _ => panic!("DMA finished wrong buffer!"),
+            };
+
+            let next_buf = self
+                .buffer
+                .next_dma_buffer()
+                .expect("Ran out of buffer space")
+                .as_mut_ptr() as u32;
+
+            let old = unsafe { DmaGrant::from_ptr(memory_reg.read_volatile() as *mut _) };
+            unsafe { memory_reg.write_volatile(next_buf) };
+
+            self.buffer.dma_done(old);
+            self.next_done = StreamMemoryBank::Bank1
+        }
     }
 }

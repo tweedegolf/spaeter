@@ -11,6 +11,10 @@ impl DmaGrant {
     pub fn as_mut_ptr(&mut self) -> *mut u16 {
         self.ptr
     }
+
+    pub(super) unsafe fn from_ptr(ptr: *mut u16) -> Self {
+        Self { ptr }
+    }
 }
 
 unsafe impl Send for DmaGrant {}

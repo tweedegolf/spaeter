@@ -22,7 +22,7 @@ use stm32f7xx_hal::{
 };
 
 use spaeter_firmware::{
-    adc_capture::AdcCaptureBuffer,
+    adc_capture::{AdcCapture, AdcCaptureBuffer},
     ethernet::{
         self, generate_mac_address, recv_slice, DmaResources, NetworkStack, TcpSocketResources,
         UdpSocketResources,
@@ -52,6 +52,7 @@ mod app {
         net: NetworkStack,
         ptp_port: port::Port,
         tx_waker: WakerRegistration,
+        adc_capture: AdcCapture,
     }
 
     #[local]
@@ -143,16 +144,15 @@ mod app {
         defmt::println!("Going to do scary stuff now");
 
         let adc_conversion_data = ADC_CONVERSION_DATA.init_with(|| core::array::from_fn(|_| 0));
-
-        // let adc_capture = AdcCapture::init(
-        //     adc_conversion_data,
-        //     p.ADC1,
-        //     p.TIM2,
-        //     p.DMA2,
-        //     &mut rcc.apb1,
-        //     &mut rcc.apb2,
-        //     &mut rcc.ahb1,
-        // );
+        let adc_capture = AdcCapture::init(
+            adc_conversion_data,
+            p.ADC1,
+            p.TIM2,
+            p.DMA2,
+            &mut rcc.apb1,
+            &mut rcc.apb2,
+            &mut rcc.ahb1,
+        );
         defmt::println!("👻");
 
         // Setup Ethernet
@@ -271,6 +271,7 @@ mod app {
                 net,
                 ptp_port,
                 tx_waker: WakerRegistration::new(),
+                adc_capture,
             },
             Local {},
         )
@@ -563,25 +564,13 @@ mod app {
         }
     }
 
-    #[task(binds = DMA2_STREAM0, priority = 1)]
+    #[task(binds = DMA2_STREAM0, shared = [ adc_capture ], priority = 1)]
     fn on_dma2_stream0(mut cx: on_dma2_stream0::Context) {
-        let dma2 = unsafe { &*pac::DMA2::ptr() };
-        let lisr = dma2.lisr.read().bits();
-        dma2.lifcr.write(|w| unsafe { w.bits(lisr) });
+        cx.shared
+            .adc_capture
+            .lock(|capture| capture.dma_interrupt_handler());
 
-        let cfg = dma2.st[0].cr.read().bits();
-        let ndtr = dma2.st[0].ndtr.read().bits();
-        // defmt::println!(
-        //     "cfg={=u32:032b}\tndtr={=u32}\tlisr={=u32:032b}",
-        //     cfg,
-        //     ndtr,
-        //     lisr
-        // );
-
-        // let datum = unsafe { &ADC_CONVERSION_DATA[0][..16] };
-        // let datum2 = unsafe { &ADC_CONVERSION_DATA[1][..16] };
-        // defmt::println!("DMA2_STREAM0! {:?}", datum);
-        // defmt::println!("DMA2_STREAM0! {:?}", datum2);
+        // TODO: Handle new data
     }
 
     #[task(binds = TIM2, priority = 1)]

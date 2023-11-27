@@ -1,7 +1,4 @@
-use core::{
-    cmp::Ordering,
-    ops::{Range, RangeFrom, RangeTo},
-};
+mod ring_buffer;
 
 use hal::{
     pac,
@@ -9,114 +6,18 @@ use hal::{
 };
 use stm32f7xx_hal as hal;
 
+use super::timing::SampleIndex;
+use ring_buffer::{DmaGrant, DoubleBufferedRingBuffer};
+
 pub type Dma2Stream = pac::dma2::ST;
 
-type AdcCaptureChunk = [u16; AdcCapture::CONVS_PER_CHUNK];
-pub type AdcCaptureBuffer = [u16; AdcCapture::CONVS_PER_CHUNK * AdcCapture::BUF_NUM_CHUNKS];
+const CAPTURE_LEN: usize = AdcCapture::CONVS_PER_CHUNK * AdcCapture::BUF_NUM_CHUNKS;
 
-enum RingRange {
-    Empty,
-    Normal(Range<usize>),
-    Wrapped(RangeFrom<usize>, RangeTo<usize>),
-}
+pub type AdcCaptureBuffer = [u16; CAPTURE_LEN];
 
-struct DoubleBufferedRingBuffer {
-    buffer: &'static mut AdcCaptureBuffer,
-    app_range: RingRange,
-    free_range: RingRange,
-}
-impl DoubleBufferedRingBuffer {
-    fn new(buffer: &'static mut AdcCaptureBuffer) -> DoubleBufferedRingBuffer {
-        Self {
-            app_range: RingRange::Empty,
-            free_range: RingRange::Normal(0..buffer.len()),
-            buffer,
-        }
-    }
-
-    fn next_dma_buffer(&mut self) -> Option<&mut [u16; AdcCapture::CONVS_PER_CHUNK]> {
-        let (new_range, dma_range) = match &self.free_range {
-            RingRange::Empty => return None,
-            RingRange::Normal(range) => {
-                let new_start = range.start + AdcCapture::CONVS_PER_CHUNK;
-                match new_start.cmp(&range.end) {
-                    Ordering::Less => (
-                        RingRange::Normal(new_start..range.end),
-                        range.start..new_start,
-                    ),
-                    Ordering::Equal => (RingRange::Empty, range.clone()),
-                    Ordering::Greater => return None,
-                }
-            }
-            RingRange::Wrapped(morning, afternoon) => {
-                let new_start = morning.start + AdcCapture::CONVS_PER_CHUNK;
-                match new_start.cmp(&self.buffer.len()) {
-                    Ordering::Less => (RingRange::Wrapped(new_start.., afternoon.clone()), morning.start..new_start),
-                    Ordering::Equal =>  (RingRange::Normal(0..afternoon.end), morning.start..self.buffer.len()),
-                    Ordering::Greater => unreachable!("morning.start was already bigger the length or the length as not divisible by CONVS_PER_CHUNK"),
-                }
-            }
-        };
-
-        self.free_range = new_range;
-        todo!()
-        // let dma_buffer = &mut self.buffer[dma_range]
-        //     .try_into()
-        //     .expect("dma_range is always CONVS_PER_CHUNK long");
-
-        // Some(dma_buffer)
-    }
-
-    fn app_release(&mut self, num_bytes: usize) {
-        let (new_app_range, released_range) = match &self.app_range {
-            RingRange::Empty => panic!("Released bytes while not owning any!"),
-            RingRange::Normal(app) => {
-                let new_start = app.start + num_bytes;
-                if !app.contains(&new_start) {
-                    panic!("Released more bytes then you owned");
-                }
-
-                (
-                    RingRange::Normal(new_start..app.end),
-                    RingRange::Normal(app.start..new_start),
-                )
-            }
-            RingRange::Wrapped(morning, afternoon) => {
-                let new_start = morning.start + num_bytes;
-                match new_start.cmp(&self.buffer.len()) {
-                    Ordering::Less => (
-                        RingRange::Wrapped(new_start.., afternoon.clone()),
-                        RingRange::Normal(morning.start..new_start),
-                    ),
-                    Ordering::Equal => (
-                        RingRange::Normal(0..afternoon.end),
-                        RingRange::Normal(morning.start..self.buffer.len()),
-                    ),
-                    Ordering::Greater => {
-                        if num_bytes > self.buffer.len() + morning.start {
-                            // TODO somewhere here should also be a new_range EMPTY
-                            (
-                                RingRange::Normal((new_start % self.buffer.len())..afternoon.end),
-                                RingRange::Wrapped(
-                                    morning.clone(),
-                                    ..(new_start % self.buffer.len()),
-                                ),
-                            )
-                        } else {
-                            (
-                                RingRange::Normal(0..afternoon.end),
-                                RingRange::Normal(morning.start..self.buffer.len()),
-                            )
-                        }
-                    }
-                }
-            }
-        };
-
-        self.app_range = new_app_range;
-
-        // TODO now update the free range eggs
-    }
+enum StreamMemoryBank {
+    Bank0,
+    Bank1,
 }
 
 pub struct AdcCapture {
@@ -124,6 +25,7 @@ pub struct AdcCapture {
     tim2: pac::TIM2,
     dma2: pac::DMA2,
     buffer: DoubleBufferedRingBuffer,
+    next_done: StreamMemoryBank,
 }
 
 impl AdcCapture {
@@ -138,13 +40,12 @@ impl AdcCapture {
         apb2: &mut rcc::APB2,
         ahb1: &mut rcc::AHB1,
     ) -> Self {
-        let initial_dma_m0a = buffer[..].as_ptr();
-        let initial_dma_m1a = buffer[Self::BUF_NUM_CHUNKS..].as_ptr();
         let mut this = Self {
             adc1,
             tim2,
             dma2,
             buffer: DoubleBufferedRingBuffer::new(buffer),
+            next_done: StreamMemoryBank::Bank0,
         };
 
         this.init_dma2(ahb1);
@@ -219,12 +120,12 @@ impl AdcCapture {
         // Point DMA Memory 0 to first chunk of data buffer
         dma2_stream0.m0ar.write(|w| unsafe {
             w.m0a()
-                .bits(self.buffer.next_dma_buffer().unwrap().as_ptr() as u32)
+                .bits(self.buffer.next_dma_buffer().unwrap().as_mut_ptr() as u32)
         });
         // Point DMA Memory 1 to second chunk of data buffer
         dma2_stream0.m1ar.write(|w| unsafe {
             w.m1a()
-                .bits(self.buffer.next_dma_buffer().unwrap().as_ptr() as u32)
+                .bits(self.buffer.next_dma_buffer().unwrap().as_mut_ptr() as u32)
         });
 
         // Enable DMA2 Stream 0
@@ -297,5 +198,65 @@ impl AdcCapture {
 
         // Enable CC1
         tim2.ccer.modify(|_, w| w.cc1e().set_bit());
+    }
+
+    pub fn dma_interrupt_handler(&mut self) {
+        // Reset interrupt flag
+        let lisr = self.dma2.lisr.read();
+        self.dma2.lifcr.write(|w| unsafe { w.bits(lisr.bits()) });
+
+        let hisr = self.dma2.hisr.read();
+        self.dma2.hifcr.write(|w| unsafe { w.bits(hisr.bits()) });
+
+        // Fetch status
+        let stream0 = &self.dma2.st[0];
+        let current_transfer = stream0.cr.read().ct();
+
+        // Check if we hit an error
+        if lisr.teif0().is_error() || lisr.dmeif0().is_error() || lisr.feif0().is_error() {
+            panic!("DMA error on stream 0");
+        }
+        if lisr.teif1().is_error()
+            || lisr.dmeif1().is_error()
+            || lisr.feif1().is_error()
+            || lisr.teif2().is_error()
+            || lisr.dmeif2().is_error()
+            || lisr.feif2().is_error()
+            || lisr.teif3().is_error()
+            || lisr.dmeif3().is_error()
+            || lisr.feif3().is_error()
+            || hisr.bits() != 0
+        {
+            panic!("DMA error on some stream >0");
+        }
+
+        // ADC transfer is done
+        if lisr.tcif0().is_complete() {
+            let memory_reg = match (&self.next_done, current_transfer.is_memory0()) {
+                (StreamMemoryBank::Bank0, true) => stream0.m0ar.as_ptr(),
+                (StreamMemoryBank::Bank1, false) => stream0.m1ar.as_ptr(),
+                _ => panic!("DMA finished wrong buffer!"),
+            };
+
+            let next_buf = self
+                .buffer
+                .next_dma_buffer()
+                .expect("Ran out of buffer space")
+                .as_mut_ptr() as u32;
+
+            let old = unsafe { DmaGrant::from_ptr(memory_reg.read_volatile() as *mut _) };
+            unsafe { memory_reg.write_volatile(next_buf) };
+
+            self.buffer.dma_done(old);
+            self.next_done = StreamMemoryBank::Bank1
+        }
+    }
+
+    pub fn data_buffer(&self) -> (SampleIndex, (&[u16], &[u16])) {
+        (self.buffer.first_idx(), self.buffer.app_data())
+    }
+
+    pub fn release_data(&mut self, num_samples: usize) {
+        self.buffer.app_done(num_samples);
     }
 }

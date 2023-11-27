@@ -187,6 +187,7 @@ mod tests {
     use statime::time::{Duration, Time};
 
     #[test]
+    #[cfg(not(miri))]
     fn sample_idx_to_value() {
         let obs = TimerObservations::new(10u32.MHz(), 5u32.MHz());
 
@@ -202,6 +203,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(miri))]
     fn timer_rate() {
         let mut obs = TimerObservations::new(10u32.MHz(), 5u32.MHz());
 
@@ -221,6 +223,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(miri))]
     fn end2end() {
         generic_e2e(
             1.MHz(),
@@ -293,6 +296,7 @@ mod tests {
 
     // We assume just taking the rate between first and last element is equal to averaging all rates
     #[test]
+    #[cfg(not(miri))]
     fn average_rate_optimization() {
         let adc_clk = 54.MHz();
         let tim2_clk = adc_clk * 2;
@@ -339,6 +343,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(miri))]
     fn std_dev() {
         let adc_clk = 54.MHz();
         let tim2_clk = adc_clk * 2;

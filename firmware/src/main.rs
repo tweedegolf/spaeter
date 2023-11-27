@@ -43,13 +43,6 @@ defmt::timestamp!("{=u64:iso8601ms}", {
     time.seconds() as u64 * 1_000 + (time.subseconds().nanos() / 1000000) as u64
 });
 
-#[cfg(test)]
-#[no_mangle]
-fn main() -> ! {
-    unreachable!()
-}
-
-#[cfg(not(test))]
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
     use super::*;
@@ -233,7 +226,7 @@ mod app {
         type TimerMsg = (TimerName, core::time::Duration);
         let (timer_sender, timer_receiver) = make_channel!(TimerMsg, 4);
 
-        type PacketIdMsg = (statime::TimestampContext, PacketId);
+        type PacketIdMsg = (statime::port::TimestampContext, PacketId);
         let (packet_id_sender, packet_id_receiver) = make_channel!(PacketIdMsg, 16);
 
         // Setup context for event handling around the `ptp_port`
@@ -372,7 +365,7 @@ mod app {
     #[task(shared = [net, ptp_port, tx_waker], priority = 0)]
     async fn tx_timestamp_listener(
         mut cx: tx_timestamp_listener::Context,
-        mut packet_id_receiver: Receiver<'static, (statime::TimestampContext, PacketId), 16>,
+        mut packet_id_receiver: Receiver<'static, (statime::port::TimestampContext, PacketId), 16>,
     ) {
         // Extract state to keep code more readable
         let tx_waker = &mut cx.shared.tx_waker;

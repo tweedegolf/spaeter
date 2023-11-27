@@ -41,7 +41,7 @@ futures = { version = "0.3.28", default-features = false, features = [
     "async-await",
 ] }
 
-statime = { git = "https://github.com/pendulum-project/statime.git", default-features = false }
+statime = "0.1.0"
 fixed = "1.23.1"
 az = "1.2"
 libm = "0.2.8"

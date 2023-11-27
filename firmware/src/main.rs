@@ -15,7 +15,7 @@ use rtic::{app, Mutex};
 use rtic_monotonics::systick::{ExtU64, Systick};
 use rtic_sync::{channel::Receiver, make_channel};
 use smoltcp::iface::{SocketHandle, SocketStorage};
-use statime::{BasicFilter, PtpInstance};
+use statime::{filters::BasicFilter, PtpInstance};
 use stm32_eth::{dma::PacketId, EthPins, Parts, PartsIn};
 use stm32f7xx_hal::{
     gpio::{Output, Pin, Speed},

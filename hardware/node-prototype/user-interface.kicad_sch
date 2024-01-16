@@ -1,0 +1,15 @@
+(kicad_sch (version 20230121) (generator eeschema)
+
+  (uuid f7870c27-93e1-4bb8-bf36-a98363d565ef)
+
+  (paper "A4")
+
+  (lib_symbols
+  )
+
+
+  (text "TODO:\nAdd buttons and LEDs" (at 114.2985 42.9504 0)
+    (effects (font (size 1.27 1.27)) (justify left bottom))
+    (uuid 5f522b14-55e6-4eb6-beb7-719b2f4d97b2)
+  )
+)

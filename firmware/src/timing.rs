@@ -2,7 +2,7 @@ use core::ops::Div;
 use fixed::types::I96F32;
 use fugit::HertzU32;
 use libm::{ceil, pow, sqrt};
-use statime::Time;
+use statime::time::{Duration, Time};
 
 #[derive(Copy, Clone, Debug, defmt::Format, Eq, PartialEq)]
 pub struct SampleIndex(pub u64);
@@ -11,15 +11,15 @@ pub struct SampleIndex(pub u64);
 pub struct TimerValue(pub u64);
 
 impl Div<HertzU32> for TimerValue {
-    type Output = statime::Duration;
+    type Output = statime::time::Duration;
 
     fn div(self, rhs: HertzU32) -> Self::Output {
-        let secs = statime::Duration::from_secs(self.0 as i64) / u64::from(rhs.to_Hz());
+        let secs = statime::time::Duration::from_secs(self.0 as i64) / u64::from(rhs.to_Hz());
         secs
     }
 }
 
-pub type Observation = (TimerValue, statime::Time);
+pub type Observation = (TimerValue, Time);
 
 pub struct TimerObservations {
     obs: heapless::Deque<Observation, { Self::LEN }>,
@@ -44,7 +44,7 @@ impl TimerObservations {
         }
     }
 
-    pub fn push(&mut self, timer: TimerValue, timestamp: statime::Time) {
+    pub fn push(&mut self, timer: TimerValue, timestamp: statime::time::Time) {
         if let Some(&(last_timer, last_timestamp)) = self.obs.back() {
             assert!(
                 timer > last_timer,
@@ -113,7 +113,7 @@ impl TimerObservations {
         Some(HertzU32::Hz(ceil(sqrt(squared_error)) as _))
     }
 
-    pub fn timer_start(&self) -> Option<statime::Time> {
+    pub fn timer_start(&self) -> Option<Time> {
         let avg_rate = self.avg_timer_rate()?;
 
         let avg_start = self
@@ -129,19 +129,19 @@ impl TimerObservations {
         Some(Time::from_nanos(avg_start as u64))
     }
 
-    pub fn timer_start_fast_and_inaccurate(&self) -> Option<statime::Time> {
+    pub fn timer_start_fast_and_inaccurate(&self) -> Option<Time> {
         let obs = self.obs.back()?;
         let duration_since_start = obs.0 / self.avg_timer_rate()?;
         let timer_start = obs.1 - duration_since_start;
         Some(timer_start)
     }
 
-    fn to_timestamp(&self, t: TimerValue) -> Option<statime::Time> {
+    fn to_timestamp(&self, t: TimerValue) -> Option<Time> {
         let time_since_start = t / self.avg_timer_rate()?;
         Some(self.timer_start()? + time_since_start)
     }
 
-    pub fn time_std_dev(&self) -> Option<statime::Duration> {
+    pub fn time_std_dev(&self) -> Option<Duration> {
         if self.obs.len() < 2 {
             return None;
         }
@@ -160,10 +160,10 @@ impl TimerObservations {
 
         let error = sqrt(squared_error);
         let error = error / 1.07026154578459; // Magic correction factor -- determined by experiment
-        Some(statime::Duration::from_seconds(error))
+        Some(Duration::from_seconds(error))
     }
 
-    pub fn sample_time(&self, idx: SampleIndex) -> Option<statime::Time> {
+    pub fn sample_time(&self, idx: SampleIndex) -> Option<Time> {
         let timer_value = self.sample_idx_to_timer_value(idx);
         self.to_timestamp(timer_value)
     }
@@ -184,9 +184,10 @@ mod tests {
     use rand::distributions::Distribution;
     use rand::thread_rng;
     use rand_distr::Normal;
-    use statime::{Duration, Time};
+    use statime::time::{Duration, Time};
 
     #[test]
+    #[cfg(not(miri))]
     fn sample_idx_to_value() {
         let obs = TimerObservations::new(10u32.MHz(), 5u32.MHz());
 
@@ -202,6 +203,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(miri))]
     fn timer_rate() {
         let mut obs = TimerObservations::new(10u32.MHz(), 5u32.MHz());
 
@@ -221,6 +223,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(miri))]
     fn end2end() {
         generic_e2e(
             1.MHz(),
@@ -293,6 +296,7 @@ mod tests {
 
     // We assume just taking the rate between first and last element is equal to averaging all rates
     #[test]
+    #[cfg(not(miri))]
     fn average_rate_optimization() {
         let adc_clk = 54.MHz();
         let tim2_clk = adc_clk * 2;
@@ -339,6 +343,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(miri))]
     fn std_dev() {
         let adc_clk = 54.MHz();
         let tim2_clk = adc_clk * 2;

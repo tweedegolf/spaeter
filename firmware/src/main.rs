@@ -1,8 +1,6 @@
 #![no_main]
 #![no_std]
 #![feature(type_alias_impl_trait)]
-// This lint produces false positives in this project with the nightly-2023-09-19 compiler
-#![allow(clippy::needless_pass_by_ref_mut)]
 
 use core::{pin::pin, task::Poll};
 
@@ -15,7 +13,7 @@ use rtic::{app, Mutex};
 use rtic_monotonics::systick::{ExtU64, Systick};
 use rtic_sync::{channel::Receiver, make_channel};
 use smoltcp::iface::{SocketHandle, SocketStorage};
-use statime::{BasicFilter, PtpInstance};
+use statime::{filters::BasicFilter, PtpInstance};
 use stm32_eth::{dma::PacketId, EthPins, Parts, PartsIn};
 use stm32f7xx_hal::{
     gpio::{Output, Pin, Speed},
@@ -24,7 +22,7 @@ use stm32f7xx_hal::{
 };
 
 use spaeter_firmware::{
-    adc_capture::AdcCaptureBuffer,
+    adc_capture::{AdcCapture, AdcCaptureBuffer},
     ethernet::{
         self, generate_mac_address, recv_slice, DmaResources, NetworkStack, TcpSocketResources,
         UdpSocketResources,
@@ -43,13 +41,6 @@ defmt::timestamp!("{=u64:iso8601ms}", {
     time.seconds() as u64 * 1_000 + (time.subseconds().nanos() / 1000000) as u64
 });
 
-#[cfg(test)]
-#[no_mangle]
-fn main() -> ! {
-    unreachable!()
-}
-
-#[cfg(not(test))]
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
     use super::*;
@@ -61,6 +52,7 @@ mod app {
         net: NetworkStack,
         ptp_port: port::Port,
         tx_waker: WakerRegistration,
+        adc_capture: AdcCapture,
     }
 
     #[local]
@@ -152,16 +144,15 @@ mod app {
         defmt::println!("Going to do scary stuff now");
 
         let adc_conversion_data = ADC_CONVERSION_DATA.init_with(|| core::array::from_fn(|_| 0));
-
-        // let adc_capture = AdcCapture::init(
-        //     adc_conversion_data,
-        //     p.ADC1,
-        //     p.TIM2,
-        //     p.DMA2,
-        //     &mut rcc.apb1,
-        //     &mut rcc.apb2,
-        //     &mut rcc.ahb1,
-        // );
+        let adc_capture = AdcCapture::init(
+            adc_conversion_data,
+            p.ADC1,
+            p.TIM2,
+            p.DMA2,
+            &mut rcc.apb1,
+            &mut rcc.apb2,
+            &mut rcc.ahb1,
+        );
         defmt::println!("👻");
 
         // Setup Ethernet
@@ -233,7 +224,7 @@ mod app {
         type TimerMsg = (TimerName, core::time::Duration);
         let (timer_sender, timer_receiver) = make_channel!(TimerMsg, 4);
 
-        type PacketIdMsg = (statime::TimestampContext, PacketId);
+        type PacketIdMsg = (statime::port::TimestampContext, PacketId);
         let (packet_id_sender, packet_id_receiver) = make_channel!(PacketIdMsg, 16);
 
         // Setup context for event handling around the `ptp_port`
@@ -280,6 +271,7 @@ mod app {
                 net,
                 ptp_port,
                 tx_waker: WakerRegistration::new(),
+                adc_capture,
             },
             Local {},
         )
@@ -372,7 +364,7 @@ mod app {
     #[task(shared = [net, ptp_port, tx_waker], priority = 0)]
     async fn tx_timestamp_listener(
         mut cx: tx_timestamp_listener::Context,
-        mut packet_id_receiver: Receiver<'static, (statime::TimestampContext, PacketId), 16>,
+        mut packet_id_receiver: Receiver<'static, (statime::port::TimestampContext, PacketId), 16>,
     ) {
         // Extract state to keep code more readable
         let tx_waker = &mut cx.shared.tx_waker;
@@ -572,25 +564,13 @@ mod app {
         }
     }
 
-    #[task(binds = DMA2_STREAM0, priority = 1)]
+    #[task(binds = DMA2_STREAM0, shared = [ adc_capture ], priority = 1)]
     fn on_dma2_stream0(mut cx: on_dma2_stream0::Context) {
-        let dma2 = unsafe { &*pac::DMA2::ptr() };
-        let lisr = dma2.lisr.read().bits();
-        dma2.lifcr.write(|w| unsafe { w.bits(lisr) });
+        cx.shared
+            .adc_capture
+            .lock(|capture| capture.dma_interrupt_handler());
 
-        let cfg = dma2.st[0].cr.read().bits();
-        let ndtr = dma2.st[0].ndtr.read().bits();
-        // defmt::println!(
-        //     "cfg={=u32:032b}\tndtr={=u32}\tlisr={=u32:032b}",
-        //     cfg,
-        //     ndtr,
-        //     lisr
-        // );
-
-        // let datum = unsafe { &ADC_CONVERSION_DATA[0][..16] };
-        // let datum2 = unsafe { &ADC_CONVERSION_DATA[1][..16] };
-        // defmt::println!("DMA2_STREAM0! {:?}", datum);
-        // defmt::println!("DMA2_STREAM0! {:?}", datum2);
+        // TODO: Handle new data
     }
 
     #[task(binds = TIM2, priority = 1)]

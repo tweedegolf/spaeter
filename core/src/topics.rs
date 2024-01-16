@@ -47,13 +47,15 @@ impl From<serde_json_core::ser::Error> for Error {
     }
 }
 
-impl TopicData for SignalPeakPayload {
+impl minimq::publication::ToPayload for SignalPeakPayload {
     type Error = Error;
 
-    fn serialize(&self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-        Ok(serde_json_core::to_slice(self, buffer)?)
+    fn serialize(self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        Ok(serde_json_core::to_slice(&self, buffer)?)
     }
+}
 
+impl TopicData for SignalPeakPayload {
     fn deserialize(buffer: &[u8]) -> Result<Self, Self::Error>
     where
         Self: Sized,
@@ -72,13 +74,14 @@ pub struct DetectedLocation {
     pub timestamp: Timestamp,
 }
 
-impl TopicData for DetectedLocation {
+impl minimq::publication::ToPayload for DetectedLocation {
     type Error = Error;
 
-    fn serialize(&self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-        Ok(serde_json_core::to_slice(self, buffer)?)
+    fn serialize(self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        Ok(serde_json_core::to_slice(&self, buffer)?)
     }
-
+}
+impl TopicData for DetectedLocation {
     fn deserialize(buffer: &[u8]) -> Result<Self, Self::Error>
     where
         Self: Sized,

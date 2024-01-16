@@ -13,6 +13,7 @@ use rtic::{app, Mutex};
 use rtic_monotonics::systick::{ExtU64, Systick};
 use rtic_sync::{channel::Receiver, make_channel};
 use smoltcp::iface::{SocketHandle, SocketStorage};
+use spaeter_core::AnchorId;
 use statime::{filters::BasicFilter, PtpInstance};
 use stm32_eth::{dma::PacketId, EthPins, Parts, PartsIn};
 use stm32f7xx_hal::{
@@ -41,8 +42,14 @@ defmt::timestamp!("{=u64:iso8601ms}", {
     time.seconds() as u64 * 1_000 + (time.subseconds().nanos() / 1000000) as u64
 });
 
+// TODO: Make config?
+const ANCHOR_ID: AnchorId = AnchorId(0);
+
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
+    use spaeter_core::Timestamped;
+    use spaeter_firmware::timing::SampleIndex;
+
     use super::*;
 
     static ADC_CONVERSION_DATA: StaticCell<AdcCaptureBuffer> = StaticCell::new();
@@ -52,11 +59,17 @@ mod app {
         net: NetworkStack,
         ptp_port: port::Port,
         tx_waker: WakerRegistration,
-        adc_capture: AdcCapture,
     }
 
     #[local]
-    struct Local {}
+    struct Local {
+        audio_chunk_sender: rtic_sync::channel::Sender<
+            'static,
+            (SampleIndex, [f32; signal_detector::CHUNK_SIZE]),
+            64,
+        >,
+        adc_capture: AdcCapture,
+    }
 
     #[init(local = [
         dma_resources: DmaResources = DmaResources::new(),
@@ -236,6 +249,9 @@ mod app {
             ptp_port,
         );
 
+        type AudioChunk = (SampleIndex, [f32; signal_detector::CHUNK_SIZE]);
+        let (audio_chunk_sender, audio_chunk_receiver) = make_channel!(AudioChunk, 64);
+
         // Start tasks
         {
             // Blink LED
@@ -264,6 +280,10 @@ mod app {
 
             // Poll mqtt client
             poll_mqtt::spawn().unwrap_or_else(|_| defmt::panic!("Failed to start poll_mqtt"));
+
+            // Receive audio from the DMA and process it
+            audio_chunk_processor::spawn(audio_chunk_receiver)
+                .unwrap_or_else(|_| defmt::panic!("Failed to start audio_chunk_processor"));
         }
 
         (
@@ -271,9 +291,11 @@ mod app {
                 net,
                 ptp_port,
                 tx_waker: WakerRegistration::new(),
-                adc_capture,
             },
-            Local {},
+            Local {
+                adc_capture,
+                audio_chunk_sender,
+            },
         )
     }
 
@@ -549,29 +571,96 @@ mod app {
                 }
             });
             if !did_recv {
-                Systick::delay(500u64.millis()).await;
+                Systick::delay(5u64.millis()).await;
             }
         }
     }
 
-    #[task(binds = DMA2_STREAM0, shared = [ adc_capture ], priority = 1)]
-    fn on_dma2_stream0(mut cx: on_dma2_stream0::Context) {
-        cx.shared
-            .adc_capture
-            .lock(|capture| capture.dma_interrupt_handler());
+    #[task(binds = DMA2_STREAM0, local = [adc_capture, audio_chunk_sender], priority = 1)]
+    fn on_dma2_stream0(cx: on_dma2_stream0::Context) {
+        cx.local.adc_capture.dma_interrupt_handler();
 
-        // TODO: Handle new data
+        let (mut index, (sample_data, _)) = cx.local.adc_capture.data_buffer();
+
+        let samples_to_take =
+            (sample_data.len() / signal_detector::CHUNK_SIZE) * signal_detector::CHUNK_SIZE;
+
+        for chunk in sample_data.chunks_exact(signal_detector::CHUNK_SIZE) {
+            let mut float_chunk = [0.0; signal_detector::CHUNK_SIZE];
+
+            for (sample, float_sample) in chunk.iter().zip(float_chunk.iter_mut()) {
+                // Convert the 12-bit samples to floats of -1.0..1.0
+                *float_sample = ((*sample as f32) / 2048.0) - 1.0;
+            }
+
+            unwrap!(cx
+                .local
+                .audio_chunk_sender
+                .try_send((index, float_chunk))
+                .ok());
+            index.0 += signal_detector::CHUNK_SIZE as u64;
+        }
+
+        cx.local.adc_capture.release_data(samples_to_take);
+    }
+
+    #[task(
+        local = [
+            // TODO: What is our sample-rate?
+            signal_detector: signal_detector::SignalDetector = signal_detector::SignalDetector::new(44100.0)
+        ],
+        shared = [net],
+        priority = 0,
+    )]
+    async fn audio_chunk_processor(
+        mut cx: audio_chunk_processor::Context,
+        mut audio_chunk_receiver: Receiver<
+            'static,
+            (SampleIndex, [f32; signal_detector::CHUNK_SIZE]),
+            64,
+        >,
+    ) {
+        loop {
+            let (_index, chunk) = unwrap!(audio_chunk_receiver.recv().await.ok());
+
+            // TODO: Get actual time
+            let sample_timestamp = spaeter_core::Timestamp::new(0, 0);
+            let peaks = cx.local.signal_detector.feed(&chunk);
+
+            let publish_topic = spaeter_core::topics::signal_peak_topic(Some(ANCHOR_ID));
+
+            for peak in peaks {
+                loop {
+                    let message = minimq::Publication::new(Timestamped {
+                        timestamp: sample_timestamp,
+                        value: peak,
+                    })
+                    .topic(&publish_topic)
+                    .finish()
+                    .unwrap();
+
+                    match cx.shared.net.lock(|net| net.mqtt.client().publish(message)) {
+                        Ok(()) => {
+                            break;
+                        }
+                        Err(e) => match e {
+                            minimq::PubError::Error(minimq::Error::NotReady) => {
+                                Systick::delay(1u64.millis()).await;
+                            }
+                            e => {
+                                panic!("Could not publish signal peak: {e:?}")
+                            }
+                        },
+                    }
+                }
+            }
+        }
     }
 
     #[task(binds = TIM2, priority = 1)]
     fn on_tim2_update(_cx: on_tim2_update::Context) {
         let tim2 = unsafe { &*pac::TIM2::ptr() };
-        let sr = tim2.sr.read();
-        tim2.sr.write(|w| unsafe { w.bits(!sr.bits()) });
-
-        let cc1 = tim2.ccr1.read().ccr().bits();
-        defmt::println!("TIM2 CC1: {}", cc1);
-        defmt::println!("TIM2 {=u32:032b}!", sr.bits());
+        tim2.sr.modify(|r, w| unsafe { w.bits(!r.bits()) });
     }
 
     #[task(binds = ADC, priority = 1)]

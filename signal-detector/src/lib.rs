@@ -4,7 +4,8 @@ use heapless::Vec;
 use microfft::Complex32;
 
 const FFT_OUTPUT_SIZE: usize = 128;
-const MAX_TRACKED_PEAKS: usize = 8;
+pub const MAX_TRACKED_PEAKS: usize = 8;
+pub const CHUNK_SIZE: usize = 32;
 
 pub struct SignalDetector {
     sample_freq: f32,
@@ -15,23 +16,22 @@ impl SignalDetector {
         Self { sample_freq }
     }
 
-    pub fn feed(&mut self, data: &[f32], mut f: impl FnMut(usize, &[SignalPeak])) {
-        const CHUNK_SIZE: usize = 32;
+    /// Feed a chunk of data into the detector.
+    /// The chunk must be [CHUNK_SIZE] long.
+    pub fn feed(&mut self, chunk: &[f32]) -> Vec<SignalPeak, MAX_TRACKED_PEAKS> {
         const SAMPLE_SIZE: usize = FFT_OUTPUT_SIZE * 2;
 
-        for (i, chunk) in data.chunks(CHUNK_SIZE).enumerate() {
-            let mut zero_padded_chunk = [0.0; SAMPLE_SIZE];
-            zero_padded_chunk[..CHUNK_SIZE].copy_from_slice(chunk);
+        let mut zero_padded_chunk = [0.0; SAMPLE_SIZE];
+        zero_padded_chunk[..CHUNK_SIZE].copy_from_slice(chunk);
 
-            let fft_bins = microfft::real::rfft_256(&mut zero_padded_chunk);
+        let fft_bins = microfft::real::rfft_256(&mut zero_padded_chunk);
 
-            let mut peaks = Self::find_peaks(fft_bins, self.sample_freq);
+        let mut peaks = Self::find_peaks(fft_bins, self.sample_freq);
 
-            peaks.retain(|peak| !peak.freq.is_nan());
-            peaks.sort_unstable_by(|x, y| x.magnitude.total_cmp(&y.magnitude).reverse());
+        peaks.retain(|peak| !peak.freq.is_nan());
+        peaks.sort_unstable_by(|x, y| x.magnitude.total_cmp(&y.magnitude).reverse());
 
-            f(i * CHUNK_SIZE, &peaks);
-        }
+        peaks
     }
 
     fn find_peaks(
@@ -197,7 +197,10 @@ mod tests {
 
         let mut signals: std::vec::Vec<Signal> = vec![];
 
-        detector.feed(&audio, |sample_index, peaks| {
+        for (chunk_index, audio_chunk) in audio.chunks_exact(CHUNK_SIZE).enumerate() {
+            let peaks = detector.feed(&audio_chunk);
+            let sample_index = chunk_index * CHUNK_SIZE;
+
             let mut open_signals = signals
                 .iter_mut()
                 .filter(|signal| signal.end == 0)
@@ -211,11 +214,11 @@ mod tests {
                             && peak.freq < signal.average_frequency() + FREQUENCY_PER_BIN
                     })
                 {
-                    signal.peaks.push(*peak);
+                    signal.peaks.push(peak);
                     open_signals.remove(index);
                 } else {
                     new_signals.push(Signal {
-                        peaks: vec![*peak],
+                        peaks: vec![peak],
                         start: sample_index,
                         end: 0,
                     });
@@ -228,7 +231,7 @@ mod tests {
             }
 
             signals.append(&mut new_signals);
-        });
+        }
 
         signals.sort_by(|a, b| {
             a.average_magnitude()

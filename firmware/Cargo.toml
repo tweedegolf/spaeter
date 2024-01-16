@@ -53,6 +53,8 @@ minimq = { git = "https://github.com/tweedegolf/minimq.git" }
 smoltcp-nal = { git = "https://github.com/tweedegolf/smoltcp-nal.git" }
 embedded-time = "0.12.1"
 heapless = "0.8.0"
+signal-detector = { path = "../signal-detector" }
+spaeter-core = { path = "../core", default-features = false, features = ["libm"]}
 
 [dev-dependencies]
 rand = "0.8.5"

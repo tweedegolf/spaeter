@@ -1,4 +1,5 @@
 (sym_lib_table
   (version 7)
   (lib (name "MYBSP01201ABF_MYBSP00502ABF")(type "KiCad")(uri "${KIPRJMOD}/MYBSP01201ABF_MYBSP00502ABF.kicad_sym")(options "")(descr ""))
+  (lib (name "project_parts")(type "KiCad")(uri "${KIPRJMOD}/project_parts.kicad_sym")(options "")(descr ""))
 )

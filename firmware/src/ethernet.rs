@@ -239,7 +239,7 @@ pub async fn recv_slice(
     mut socket: SocketHandle,
     buffer: &mut [u8],
 ) -> Result<(usize, Timestamp), RecvError> {
-    poll_fn(|cx| {
+    poll_fn(|_cx| {
         let result = net.lock(|net| {
             // Get next packet (if any)
 

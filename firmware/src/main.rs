@@ -430,22 +430,12 @@ mod app {
                 None => unreachable!(),
             },
         );
-        // defmt::println!("PTP now: {}; target: {}", now, ptp_target_time);
+
         loop {
             let now = EthernetPTP::now();
             let ptp_target_time = now + PTP_SYNC_INTERVAL;
             ptp_clock.access(|clock| clock.configure_target_time_interrupt(ptp_target_time));
-            let dma2 = unsafe { &*pac::DMA2::ptr() };
-            let lisr = dma2.lisr.read().bits();
-            let cfg = dma2.st[0].cr.read().bits();
-            let ndtr = dma2.st[0].ndtr.read().bits();
-            // defmt::info!(
-            //     "cfg={=u32:032b}\tndtr={=u32}\tlisr={=u32:032b}",
-            //     cfg,
-            //     ndtr,
-            //     lisr
-            // );
-            // unsafe{&*pac::TIM2::ptr()}.egr.write(|w| w.cc1g().trigger());
+
             Systick::delay(500u64.millis()).await;
             led.set_high();
             Systick::delay(500u64.millis()).await;
@@ -574,13 +564,10 @@ mod app {
     }
 
     #[task(binds = TIM2, priority = 1)]
-    fn on_tim2_update(mut cx: on_tim2_update::Context) {
+    fn on_tim2_update(_cx: on_tim2_update::Context) {
         let tim2 = unsafe { &*pac::TIM2::ptr() };
         let sr = tim2.sr.read();
         tim2.sr.write(|w| unsafe { w.bits(!sr.bits()) });
-
-        // if sr.cc1if().bit_is_set() {
-        // }
 
         let cc1 = tim2.ccr1.read().ccr().bits();
         defmt::println!("TIM2 CC1: {}", cc1);
@@ -588,19 +575,16 @@ mod app {
     }
 
     #[task(binds = ADC, priority = 1)]
-    fn on_adc1_conversion(mut cx: on_adc1_conversion::Context) {
+    fn on_adc1_conversion(_cx: on_adc1_conversion::Context) {
         let adc1 = unsafe { &*pac::ADC1::ptr() };
-        let sr = adc1.sr.read().bits();
-        defmt::println!("ADC1 SR: {=u32:032b}", sr);
         adc1.sr
             .modify(|_, w| w.eoc().not_complete().strt().not_started());
 
         let overrun = adc1.sr.read().ovr().bit_is_set();
         if overrun {
-            defmt::println!("ADC! Overrun: {}", overrun);
+            defmt::warn!("ADC! Overrun: {}", overrun);
             adc1.sr.modify(|_, w| w.ovr().clear_bit());
         }
-        // defmt::println!("ADC1");
     }
 
     /// Handle the interrupt of the ethernet peripheral

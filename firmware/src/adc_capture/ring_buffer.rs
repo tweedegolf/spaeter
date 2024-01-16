@@ -96,6 +96,8 @@ pub struct DoubleBufferedRingBuffer {
     buffer: *mut u16,
 }
 
+unsafe impl Send for DoubleBufferedRingBuffer {}
+
 impl DoubleBufferedRingBuffer {
     pub fn new(buffer: &'static mut AdcCaptureBuffer) -> Self {
         assert_eq!(buffer.len(), CAPTURE_LEN);
@@ -194,9 +196,7 @@ impl DoubleBufferedRingBuffer {
 mod tests {
     use super::*;
     use core::array;
-    use core::slice::from_raw_parts_mut;
     use static_cell::StaticCell;
-    use std::boxed::Box;
 
     #[test]
     fn roundtrip() {

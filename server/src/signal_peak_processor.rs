@@ -27,7 +27,7 @@ impl SignalPeakProcessor {
     pub async fn register_signal_peak(&self, anchor: AnchorId, value: Timestamped<SignalPeak>) {
         let mut signals = self.signals.lock().await;
 
-        let anchor_signals = signals.entry(anchor).or_insert_with(|| Vec::new());
+        let anchor_signals = signals.entry(anchor).or_insert_with(Vec::new);
 
         // Is there an existing signal we can add this peak to?
         let found_signal = anchor_signals.iter_mut().find(|signal| {

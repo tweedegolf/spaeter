@@ -14,8 +14,7 @@ impl Div<HertzU32> for TimerValue {
     type Output = statime::time::Duration;
 
     fn div(self, rhs: HertzU32) -> Self::Output {
-        let secs = statime::time::Duration::from_secs(self.0 as i64) / u64::from(rhs.to_Hz());
-        secs
+        statime::time::Duration::from_secs(self.0 as i64) / u64::from(rhs.to_Hz())
     }
 }
 

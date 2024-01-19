@@ -694,7 +694,7 @@
     (uuid f93d814e-4506-42bd-8bda-c73e4449dcf3)
   )
 
-  (hierarchical_label "~{RESET}" (shape input) (at 255.27 147.32 0) (fields_autoplaced)
+  (hierarchical_label "~{RESET}" (shape output) (at 255.27 147.32 0) (fields_autoplaced)
     (effects (font (size 1.27 1.27)) (justify left))
     (uuid 553fc802-5119-4ac4-9ace-149ae26ad726)
   )
@@ -714,7 +714,7 @@
   (symbol (lib_id "power:VDD") (at 177.165 92.71 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 10e9df05-6df2-408b-95f0-12c4efef5aa6)
-    (property "Reference" "#PWR059" (at 177.165 96.52 0)
+    (property "Reference" "#PWR068" (at 177.165 96.52 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Value" "VDD" (at 177.165 87.63 0)
@@ -730,7 +730,7 @@
     (instances
       (project "node-prototype"
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/d0963de7-765b-4a04-94a7-48af2ede4455"
-          (reference "#PWR059") (unit 1)
+          (reference "#PWR068") (unit 1)
         )
       )
     )
@@ -751,12 +751,12 @@
     (property "Datasheet" "https://www.tag-connect.com/wp-content/uploads/bsk-pdf-manager/TC2030-CTX_1.pdf" (at 179.705 119.38 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "6" (uuid c759d2a9-7f42-40ae-a3c1-b5bc4b366c70))
-    (pin "4" (uuid 77437a45-2fe2-4c38-b8d9-a36ec7b39bee))
-    (pin "3" (uuid add61514-0b63-41de-8c05-254664aeedcb))
     (pin "1" (uuid d88c921c-03b9-496d-a044-097d84c3d99a))
     (pin "2" (uuid 4abcfc6d-9316-4744-a0db-fc1ffb1bf646))
+    (pin "3" (uuid add61514-0b63-41de-8c05-254664aeedcb))
+    (pin "4" (uuid 77437a45-2fe2-4c38-b8d9-a36ec7b39bee))
     (pin "5" (uuid b060c2a0-a32f-40e9-85e7-313caa0fda54))
+    (pin "6" (uuid c759d2a9-7f42-40ae-a3c1-b5bc4b366c70))
     (instances
       (project "node-prototype"
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/d0963de7-765b-4a04-94a7-48af2ede4455"
@@ -775,15 +775,15 @@
     (property "Value" "Conn_01x03" (at 190.5 149.86 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (at 187.96 148.59 0)
+    (property "Footprint" "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical" (at 187.96 148.59 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Datasheet" "~" (at 187.96 148.59 0)
       (effects (font (size 1.27 1.27)) hide)
     )
+    (pin "1" (uuid 400783b4-fa9a-461e-b7c2-5490b72666ed))
     (pin "2" (uuid b4474208-b24b-4c6d-bd22-9eeb1e911501))
     (pin "3" (uuid e919cb64-4214-4656-ac90-5c94429d0d21))
-    (pin "1" (uuid 400783b4-fa9a-461e-b7c2-5490b72666ed))
     (instances
       (project "node-prototype"
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/d0963de7-765b-4a04-94a7-48af2ede4455"
@@ -796,7 +796,7 @@
   (symbol (lib_id "power:GND") (at 177.165 116.205 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 68989605-bfe3-4049-a93d-791d97ae86dc)
-    (property "Reference" "#PWR060" (at 177.165 122.555 0)
+    (property "Reference" "#PWR069" (at 177.165 122.555 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Value" "GND" (at 177.165 120.65 0)
@@ -812,7 +812,7 @@
     (instances
       (project "node-prototype"
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/d0963de7-765b-4a04-94a7-48af2ede4455"
-          (reference "#PWR060") (unit 1)
+          (reference "#PWR069") (unit 1)
         )
       )
     )
@@ -821,7 +821,7 @@
   (symbol (lib_id "power:VDD") (at 76.2 92.71 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 6f22e321-d17c-486a-a31f-d36cff051aa5)
-    (property "Reference" "#PWR057" (at 76.2 96.52 0)
+    (property "Reference" "#PWR065" (at 76.2 96.52 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Value" "VDD" (at 76.2 87.63 0)
@@ -837,7 +837,7 @@
     (instances
       (project "node-prototype"
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/d0963de7-765b-4a04-94a7-48af2ede4455"
-          (reference "#PWR057") (unit 1)
+          (reference "#PWR065") (unit 1)
         )
       )
     )
@@ -846,7 +846,7 @@
   (symbol (lib_id "power:GND") (at 173.355 153.035 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid bae81dfa-2fdd-4e33-97ef-2e5f1c73cc7b)
-    (property "Reference" "#PWR061" (at 173.355 159.385 0)
+    (property "Reference" "#PWR067" (at 173.355 159.385 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Value" "GND" (at 173.355 157.48 0)
@@ -862,7 +862,7 @@
     (instances
       (project "node-prototype"
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/d0963de7-765b-4a04-94a7-48af2ede4455"
-          (reference "#PWR061") (unit 1)
+          (reference "#PWR067") (unit 1)
         )
       )
     )
@@ -871,7 +871,7 @@
   (symbol (lib_id "power:GND") (at 76.2 121.92 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid ecc917ed-5d78-41cc-ab1f-af7403506c7d)
-    (property "Reference" "#PWR058" (at 76.2 128.27 0)
+    (property "Reference" "#PWR066" (at 76.2 128.27 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Value" "GND" (at 76.2 126.365 0)
@@ -887,7 +887,7 @@
     (instances
       (project "node-prototype"
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/d0963de7-765b-4a04-94a7-48af2ede4455"
-          (reference "#PWR058") (unit 1)
+          (reference "#PWR066") (unit 1)
         )
       )
     )

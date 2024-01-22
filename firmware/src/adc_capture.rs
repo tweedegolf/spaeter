@@ -1,8 +1,9 @@
 mod ring_buffer;
 
+use fugit::HertzU32;
 use hal::{
     pac,
-    rcc::{self, Enable, Reset, APB2},
+    rcc::{self, BusClock, BusTimerClock, Clocks, Enable, Reset, APB1, APB2},
 };
 use stm32f7xx_hal as hal;
 
@@ -31,15 +32,18 @@ pub struct AdcCapture {
 impl AdcCapture {
     pub const CONVS_PER_CHUNK: usize = 1024 * 8;
     pub const BUF_NUM_CHUNKS: usize = 4;
+
+    #[allow(clippy::too_many_arguments)]
     pub fn init(
         buffer: &'static mut AdcCaptureBuffer,
         adc1: pac::ADC1,
         tim2: pac::TIM2,
         dma2: pac::DMA2,
-        apb1: &mut rcc::APB1,
+        apb1: &mut APB1,
         apb2: &mut rcc::APB2,
         ahb1: &mut rcc::AHB1,
-    ) -> Self {
+        clocks: &Clocks,
+    ) -> (Self, HertzU32, HertzU32) {
         let mut this = Self {
             adc1,
             tim2,
@@ -49,10 +53,10 @@ impl AdcCapture {
         };
 
         this.init_dma2(ahb1);
-        this.init_adc1(apb2);
-        this.init_tim2(apb1);
+        let adc_hertz = this.init_adc1(apb2, clocks);
+        let tim_hertz = this.init_tim2(apb1, clocks);
 
-        this
+        (this, adc_hertz, tim_hertz)
     }
 
     /// Configure DMA2 Stream 0 to read 16-bit conversions from ADC1
@@ -135,7 +139,7 @@ impl AdcCapture {
     /// Configure ADC1 to 12-bits resolution in
     /// single conversion mode and to be triggered externally from TIM2 TRGO
     /// and read out using DMA
-    fn init_adc1(&mut self, apb2: &mut APB2) {
+    fn init_adc1(&mut self, apb2: &mut APB2, clocks: &Clocks) -> HertzU32 {
         let adc1 = &self.adc1;
         <pac::ADC1 as Enable>::enable(apb2);
         // Power down ADC1
@@ -166,10 +170,12 @@ impl AdcCapture {
 
         // Power up ADC1
         adc1.cr2.modify(|_, w| w.adon().enabled());
+
+        APB2::clock(clocks)
     }
 
     /// Setup TIM2 to trigger ADC1 using TRGO on update event generation
-    fn init_tim2(&mut self, apb1: &mut rcc::APB1) {
+    fn init_tim2(&mut self, apb1: &mut APB1, clocks: &Clocks) -> HertzU32 {
         let tim2 = &self.tim2;
         <pac::TIM2 as Enable>::enable(apb1);
         // Set Master mode trigger on timer enable, which will enable ADC1 as well
@@ -198,6 +204,8 @@ impl AdcCapture {
 
         // Enable CC1
         tim2.ccer.modify(|_, w| w.cc1e().set_bit());
+
+        APB1::timer_clock(clocks)
     }
 
     pub fn dma_interrupt_handler(&mut self) {

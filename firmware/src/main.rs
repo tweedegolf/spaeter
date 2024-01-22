@@ -2,6 +2,7 @@
 #![no_std]
 #![feature(type_alias_impl_trait)]
 
+use core::sync::atomic::AtomicU32;
 use core::{pin::pin, task::Poll};
 
 use defmt::unwrap;
@@ -22,6 +23,7 @@ use stm32f7xx_hal::{
     rng::RngExt,
 };
 
+use spaeter_core::Timestamped;
 use spaeter_firmware::{
     adc_capture::{AdcCapture, AdcCaptureBuffer},
     ethernet::{
@@ -30,6 +32,7 @@ use spaeter_firmware::{
     },
     port::{self, setup_statime, TimerName},
     ptp_clock::{stm_time_to_statime, PtpClock},
+    timing::{SampleIndex, TimerObservations, TimerValue},
 };
 
 use defmt::Debug2Format;
@@ -47,18 +50,17 @@ const ANCHOR_ID: AnchorId = AnchorId(0);
 
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
-    use spaeter_core::Timestamped;
-    use spaeter_firmware::timing::SampleIndex;
-
     use super::*;
 
     static ADC_CONVERSION_DATA: StaticCell<AdcCaptureBuffer> = StaticCell::new();
+    static TIM2_OVERFLOWS: AtomicU32 = AtomicU32::new(0);
 
     #[shared]
     struct Shared {
         net: NetworkStack,
         ptp_port: port::Port,
         tx_waker: WakerRegistration,
+        observations: TimerObservations,
     }
 
     #[local]
@@ -69,6 +71,7 @@ mod app {
             64,
         >,
         adc_capture: AdcCapture,
+        ptp_clock: &'static PtpClock,
     }
 
     #[init(local = [
@@ -157,7 +160,7 @@ mod app {
         defmt::println!("Going to do scary stuff now");
 
         let adc_conversion_data = ADC_CONVERSION_DATA.init_with(|| core::array::from_fn(|_| 0));
-        let adc_capture = AdcCapture::init(
+        let (adc_capture, adc_clk, tim2_clk) = AdcCapture::init(
             adc_conversion_data,
             p.ADC1,
             p.TIM2,
@@ -165,6 +168,7 @@ mod app {
             &mut rcc.apb1,
             &mut rcc.apb2,
             &mut rcc.ahb1,
+            &clocks,
         );
         defmt::println!("👻");
 
@@ -255,8 +259,7 @@ mod app {
         // Start tasks
         {
             // Blink LED
-            blinky::spawn(led_pin, ptp_clock)
-                .unwrap_or_else(|_| defmt::panic!("Failed to start blinky"));
+            blinky::spawn(led_pin).unwrap_or_else(|_| defmt::panic!("Failed to start blinky"));
 
             // Listen on sockets
             event_listen::spawn().unwrap_or_else(|_| defmt::panic!("Failed to start event_listen"));
@@ -291,10 +294,12 @@ mod app {
                 net,
                 ptp_port,
                 tx_waker: WakerRegistration::new(),
+                observations: TimerObservations::new(tim2_clk, adc_clk),
             },
             Local {
                 adc_capture,
                 audio_chunk_sender,
+                ptp_clock,
             },
         )
     }
@@ -439,25 +444,8 @@ mod app {
     /// Blinks the blue LED on the Nucleo board to indicate that the program is
     /// running
     #[task(priority = 0)]
-    async fn blinky(
-        _cx: blinky::Context,
-        mut led: Pin<'B', 7, Output>,
-        ptp_clock: &'static PtpClock,
-    ) {
-        const PTP_SYNC_INTERVAL: Timestamp = Timestamp::new(
-            false,
-            0,
-            match Subseconds::new_from_nanos(1000 * 1000 * 500) {
-                Some(s) => s,
-                None => unreachable!(),
-            },
-        );
-
+    async fn blinky(_cx: blinky::Context, mut led: Pin<'B', 7, Output>) {
         loop {
-            let now = EthernetPTP::now();
-            let ptp_target_time = now + PTP_SYNC_INTERVAL;
-            ptp_clock.access(|clock| clock.configure_target_time_interrupt(ptp_target_time));
-
             Systick::delay(500u64.millis()).await;
             led.set_high();
             Systick::delay(500u64.millis()).await;
@@ -537,8 +525,6 @@ mod app {
                 })
                 .unwrap_or(50);
 
-            // TODO this could wait longer if we were notified about any other calls to
-            // poll, would be an optimization for later to go to sleep longer
             Systick::delay(delay_millis.millis()).await;
         }
     }
@@ -609,7 +595,7 @@ mod app {
             // TODO: What is our sample-rate?
             signal_detector: signal_detector::SignalDetector = signal_detector::SignalDetector::new(44100.0)
         ],
-        shared = [net],
+        shared = [net, observations],
         priority = 0,
     )]
     async fn audio_chunk_processor(
@@ -621,10 +607,20 @@ mod app {
         >,
     ) {
         loop {
-            let (_index, chunk) = unwrap!(audio_chunk_receiver.recv().await.ok());
+            let (index, chunk) = unwrap!(audio_chunk_receiver.recv().await.ok());
 
-            // TODO: Get actual time
-            let sample_timestamp = spaeter_core::Timestamp::new(0, 0);
+            let Some(sample_time) = cx
+                .shared
+                .observations
+                .lock(|observations| observations.sample_time(index))
+            else {
+                continue;
+            };
+
+            let sample_timestamp = spaeter_core::Timestamp::new(
+                sample_time.nanos().to_num(),
+                sample_time.subsec_nanos(),
+            );
             let peaks = cx.local.signal_detector.feed(&chunk);
 
             let publish_topic = spaeter_core::topics::signal_peak_topic(Some(ANCHOR_ID));
@@ -657,10 +653,11 @@ mod app {
         }
     }
 
-    #[task(binds = TIM2, priority = 1)]
+    #[task(binds = TIM2, priority = 3)]
     fn on_tim2_update(_cx: on_tim2_update::Context) {
         let tim2 = unsafe { &*pac::TIM2::ptr() };
         tim2.sr.modify(|r, w| unsafe { w.bits(!r.bits()) });
+        TIM2_OVERFLOWS.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
     }
 
     #[task(binds = ADC, priority = 1)]
@@ -677,8 +674,16 @@ mod app {
     }
 
     /// Handle the interrupt of the ethernet peripheral
-    #[task(binds = ETH, shared = [net, tx_waker], priority = 2)]
+    #[task(binds = ETH, shared = [net, tx_waker, observations], priority = 2, local = [ptp_clock, ptp_target_time: Timestamp = Timestamp::new_raw(0)])]
     fn eth_interrupt(mut cx: eth_interrupt::Context) {
+        const INTERVAL: Timestamp = Timestamp::new(false, 1, Subseconds::ZERO);
+
+        let tim2_count = unsafe { (*pac::TIM2::ptr()).cnt.read().cnt().bits() };
+        let tim2_time = TimerValue(
+            ((TIM2_OVERFLOWS.load(core::sync::atomic::Ordering::SeqCst) as u64) << 32)
+                | tim2_count as u64,
+        );
+
         let reason = stm32_eth::eth_interrupt_handler();
 
         // Receiving a tx event wakes the task waiting for tx timestamps
@@ -688,6 +693,26 @@ mod app {
 
         if reason.time_passed {
             defmt::info!("Timestamp trigger !!@#!@#");
+
+            cx.shared.observations.lock(|observations| {
+                observations.push(tim2_time, stm_time_to_statime(*cx.local.ptp_target_time))
+            });
+
+            let now = EthernetPTP::now();
+
+            *cx.local.ptp_target_time += INTERVAL;
+
+            if cx.local.ptp_target_time.raw() < now.raw() {
+                *cx.local.ptp_target_time = now + INTERVAL;
+            }
+
+            cx.local
+                .ptp_clock
+                .access(|clock| clock.configure_target_time_interrupt(*cx.local.ptp_target_time));
+        } else if *cx.local.ptp_target_time == Timestamp::new_raw(0) {
+            cx.local.ptp_clock.access(|clock| {
+                clock.configure_target_time_interrupt(EthernetPTP::now() + INTERVAL)
+            });
         }
 
         // Let smoltcp handle any new packets

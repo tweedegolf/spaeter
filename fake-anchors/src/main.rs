@@ -118,18 +118,22 @@ impl FakeAnchor {
             self.location.distance(audio_source_location) as f64 / SPEED_OF_SOUND * 1_000_000_000.0,
         );
 
-        self.signal_detector.feed(samples, |index, peaks| {
-            let timestamp =
-                Timestamp::from_nanos_f64(index as f64 * TIME_PER_SAMPLE * 1_000_000_000.0)
-                    + samples_start_time
-                    + sound_delay;
-            for peak in peaks {
+        for (chunk_index, samples_chunk) in samples.chunks(signal_detector::CHUNK_SIZE).enumerate()
+        {
+            let timestamp = Timestamp::from_nanos_f64(
+                (chunk_index * signal_detector::CHUNK_SIZE) as f64
+                    * TIME_PER_SAMPLE
+                    * 1_000_000_000.0,
+            ) + samples_start_time
+                + sound_delay;
+
+            for peak in self.signal_detector.feed(samples_chunk) {
                 f(Timestamped {
                     timestamp,
-                    value: *peak,
+                    value: peak,
                 })
             }
-        });
+        }
     }
 }
 

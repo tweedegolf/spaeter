@@ -16,6 +16,13 @@ pub struct Timestamped<T> {
 }
 
 pub trait TopicData: minimq::publication::ToPayload {
+    fn serialize(&self, buffer: &mut [u8]) -> Result<usize, Self::Error>
+    where
+        Self: Clone,
+    {
+        minimq::publication::ToPayload::serialize(self.clone(), buffer)
+    }
+
     fn deserialize(buffer: &[u8]) -> Result<Self, Self::Error>
     where
         Self: Sized;

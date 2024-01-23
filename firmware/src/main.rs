@@ -80,7 +80,7 @@ mod app {
         udp_resources: [UdpSocketResources; 2] = [UdpSocketResources::new(); 2],
         tcp_resources: TcpSocketResources = TcpSocketResources::new(),
         dma: core::cell::OnceCell<stm32_eth::dma::EthernetDMA<'static,'static> >  = core::cell::OnceCell::new(),
-        mq_buffer: [u8; 256] = [0; 256],
+        mq_buffer: [u8; 4096] = [0; 4096],
     ])]
     fn init(cx: init::Context) -> (Shared, Local) {
         let p = cx.device;
@@ -162,6 +162,7 @@ mod app {
         let adc_conversion_data = ADC_CONVERSION_DATA.init_with(|| core::array::from_fn(|_| 0));
         let (adc_capture, adc_clk, tim2_clk) = AdcCapture::init(
             adc_conversion_data,
+            p.ADC_COMMON,
             p.ADC1,
             p.TIM2,
             p.DMA2,
@@ -531,16 +532,17 @@ mod app {
 
     #[task(shared = [net], priority = 0)]
     async fn poll_mqtt(mut cx: poll_mqtt::Context) {
+        let mut connected = true;
         loop {
             let did_recv = cx.shared.net.lock(|net| {
-                defmt::info!(
-                    "Polling MQTT. Connected: {}",
-                    net.mqtt
-                        .client()
-                        .is_connected()
-                        .then_some("✅")
-                        .unwrap_or("❌")
-                );
+                if connected != net.mqtt.client().is_connected() {
+                    connected = net.mqtt.client().is_connected();
+
+                    defmt::info!(
+                        "Polling MQTT. Connected: {}",
+                        connected.then_some("✅").unwrap_or("❌")
+                    );
+                }
                 match net.mqtt.poll(|_, topic, payload, properties| {
                     defmt::info!(
                         "Received MQTT message. Topic: {}, payload: '{}', properties: {:?}",
@@ -562,7 +564,7 @@ mod app {
         }
     }
 
-    #[task(binds = DMA2_STREAM0, local = [adc_capture, audio_chunk_sender], priority = 1)]
+    #[task(binds = DMA2_STREAM0, local = [adc_capture, audio_chunk_sender], priority = 2)]
     fn on_dma2_stream0(cx: on_dma2_stream0::Context) {
         cx.local.adc_capture.dma_interrupt_handler();
 
@@ -579,11 +581,15 @@ mod app {
                 *float_sample = ((*sample as f32) / 2048.0) - 1.0;
             }
 
-            unwrap!(cx
-                .local
-                .audio_chunk_sender
-                .try_send((index, float_chunk))
-                .ok());
+            match cx.local.audio_chunk_sender.try_send((index, float_chunk)) {
+                Ok(()) => {}
+                Err(rtic_sync::channel::TrySendError::Full(_)) => {
+                    defmt::trace!("Audio chunk channel is full");
+                }
+                Err(_) => {
+                    defmt::panic!("Could not send audio chunk");
+                }
+            }
             index.0 += signal_detector::CHUNK_SIZE as u64;
         }
 
@@ -592,8 +598,7 @@ mod app {
 
     #[task(
         local = [
-            // TODO: What is our sample-rate?
-            signal_detector: signal_detector::SignalDetector = signal_detector::SignalDetector::new(44100.0)
+            signal_detector: signal_detector::SignalDetector = signal_detector::SignalDetector::new(54545.454545454545454545)
         ],
         shared = [net, observations],
         priority = 0,
@@ -644,7 +649,8 @@ mod app {
                                 Systick::delay(1u64.millis()).await;
                             }
                             e => {
-                                panic!("Could not publish signal peak: {e:?}")
+                                defmt::warn!("Could not publish signal peak: {}", defmt::Debug2Format(&e));
+                                break;
                             }
                         },
                     }

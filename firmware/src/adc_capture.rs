@@ -16,12 +16,14 @@ const CAPTURE_LEN: usize = AdcCapture::CONVS_PER_CHUNK * AdcCapture::BUF_NUM_CHU
 
 pub type AdcCaptureBuffer = [u16; CAPTURE_LEN];
 
+#[derive(Debug, Clone, Copy, defmt::Format)]
 enum StreamMemoryBank {
     Bank0,
     Bank1,
 }
 
 pub struct AdcCapture {
+    adc_common: pac::ADC_COMMON,
     adc1: pac::ADC1,
     tim2: pac::TIM2,
     dma2: pac::DMA2,
@@ -36,6 +38,7 @@ impl AdcCapture {
     #[allow(clippy::too_many_arguments)]
     pub fn init(
         buffer: &'static mut AdcCaptureBuffer,
+        adc_common: pac::ADC_COMMON,
         adc1: pac::ADC1,
         tim2: pac::TIM2,
         dma2: pac::DMA2,
@@ -45,6 +48,7 @@ impl AdcCapture {
         clocks: &Clocks,
     ) -> (Self, HertzU32, HertzU32) {
         let mut this = Self {
+            adc_common,
             adc1,
             tim2,
             dma2,
@@ -168,10 +172,13 @@ impl AdcCapture {
         // Use PA3 as input
         adc1.sqr3.modify(|_, w| unsafe { w.sq1().bits(3) });
 
+        adc1.smpr2.write(|w| w.smp0().cycles480());
+        self.adc_common.ccr.modify(|_, w| w.adcpre().div4());
+
         // Power up ADC1
         adc1.cr2.modify(|_, w| w.adon().enabled());
 
-        APB2::clock(clocks)
+        APB2::clock(clocks) / 4
     }
 
     /// Setup TIM2 to trigger ADC1 using TRGO on update event generation
@@ -218,7 +225,6 @@ impl AdcCapture {
 
         // Fetch status
         let stream0 = &self.dma2.st[0];
-        let current_transfer = stream0.cr.read().ct();
 
         // Check if we hit an error
         if lisr.teif0().is_error() || lisr.dmeif0().is_error() || lisr.feif0().is_error() {
@@ -240,10 +246,9 @@ impl AdcCapture {
 
         // ADC transfer is done
         if lisr.tcif0().is_complete() {
-            let memory_reg = match (&self.next_done, current_transfer.is_memory0()) {
-                (StreamMemoryBank::Bank0, true) => stream0.m0ar.as_ptr(),
-                (StreamMemoryBank::Bank1, false) => stream0.m1ar.as_ptr(),
-                _ => panic!("DMA finished wrong buffer!"),
+            let memory_reg = match self.next_done {
+                StreamMemoryBank::Bank0 => stream0.m0ar.as_ptr(),
+                StreamMemoryBank::Bank1 => stream0.m1ar.as_ptr(),
             };
 
             let next_buf = self
@@ -256,7 +261,10 @@ impl AdcCapture {
             unsafe { memory_reg.write_volatile(next_buf) };
 
             self.buffer.dma_done(old);
-            self.next_done = StreamMemoryBank::Bank1
+            self.next_done = match self.next_done {
+                StreamMemoryBank::Bank0 => StreamMemoryBank::Bank1,
+                StreamMemoryBank::Bank1 => StreamMemoryBank::Bank0,
+            };
         }
     }
 

@@ -475,7 +475,7 @@
       (property "Footprint" "Package_TO_SOT_SMD:SOT-23" (at 5.08 -1.905 0)
         (effects (font (size 1.27 1.27) italic) (justify left) hide)
       )
-      (property "Datasheet" "https://www.onsemi.com/pub/Collateral/NDS7002A-D.PDF" (at 0 0 0)
+      (property "Datasheet" "https://www.onsemi.com/pub/Collateral/NDS7002A-D.PDF" (at 5.08 -3.81 0)
         (effects (font (size 1.27 1.27)) (justify left) hide)
       )
       (property "ki_keywords" "N-Channel Switching MOSFET" (at 0 0 0)
@@ -1163,9 +1163,6 @@
     (pin "3" (uuid 51f1ac22-0a18-4a30-8d90-c8e2c6e3c114))
     (instances
       (project "node-prototype"
-        (path "/294f7425-8100-4c88-a430-3b04b29ed98a/01546861-6090-4f4c-8f1c-323aafea7461"
-          (reference "Q3") (unit 1)
-        )
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/7b99f3e5-8e54-4cb2-99a1-52eeff930f06"
           (reference "Q3") (unit 1)
         )
@@ -1176,10 +1173,10 @@
   (symbol (lib_id "Device:LED") (at 132.08 143.51 90) (unit 1)
     (in_bom yes) (on_board yes) (dnp no)
     (uuid 4ea90d91-53c3-46e3-98c4-5101eabb4e62)
-    (property "Reference" "D4" (at 138.43 143.8275 90)
+    (property "Reference" "D4" (at 140.335 143.51 90)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "Red" (at 138.43 146.3675 90)
+    (property "Value" "KT-0603R" (at 140.335 146.05 90)
       (effects (font (size 1.27 1.27)))
     )
     (property "Footprint" "LED_SMD:LED_0603_1608Metric" (at 132.08 143.51 0)
@@ -1188,13 +1185,13 @@
     (property "Datasheet" "~" (at 132.08 143.51 0)
       (effects (font (size 1.27 1.27)) hide)
     )
+    (property "Color" "Red" (at 127.635 143.51 90)
+      (effects (font (size 1.27 1.27)))
+    )
     (pin "1" (uuid 3e43f013-5313-457f-9811-e8f3879e61bc))
     (pin "2" (uuid ff802df7-4660-4664-81f6-e9e0e47c54e2))
     (instances
       (project "node-prototype"
-        (path "/294f7425-8100-4c88-a430-3b04b29ed98a/01546861-6090-4f4c-8f1c-323aafea7461"
-          (reference "D4") (unit 1)
-        )
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/7b99f3e5-8e54-4cb2-99a1-52eeff930f06"
           (reference "D4") (unit 1)
         )
@@ -1272,9 +1269,6 @@
     (pin "1" (uuid 4cdaaee3-0771-4e52-8fd9-f33912df22a2))
     (instances
       (project "node-prototype"
-        (path "/294f7425-8100-4c88-a430-3b04b29ed98a/01546861-6090-4f4c-8f1c-323aafea7461"
-          (reference "#PWR055") (unit 1)
-        )
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/7b99f3e5-8e54-4cb2-99a1-52eeff930f06"
           (reference "#PWR055") (unit 1)
         )
@@ -1377,9 +1371,6 @@
     (pin "1" (uuid 47e3cf1e-6706-40ed-8c60-45acec97e513))
     (instances
       (project "node-prototype"
-        (path "/294f7425-8100-4c88-a430-3b04b29ed98a/01546861-6090-4f4c-8f1c-323aafea7461"
-          (reference "#PWR056") (unit 1)
-        )
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/7b99f3e5-8e54-4cb2-99a1-52eeff930f06"
           (reference "#PWR056") (unit 1)
         )
@@ -1419,7 +1410,7 @@
     (property "Reference" "R36" (at 127 152.4 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "130R" (at 127 154.94 0)
+    (property "Value" "68R" (at 127 154.94 0)
       (effects (font (size 1.27 1.27)))
     )
     (property "Footprint" "Resistor_SMD:R_0603_1608Metric" (at 130.302 153.67 90)
@@ -1432,9 +1423,6 @@
     (pin "2" (uuid 08884435-28f7-46cc-8921-e5a157e4144f))
     (instances
       (project "node-prototype"
-        (path "/294f7425-8100-4c88-a430-3b04b29ed98a/01546861-6090-4f4c-8f1c-323aafea7461"
-          (reference "R36") (unit 1)
-        )
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/7b99f3e5-8e54-4cb2-99a1-52eeff930f06"
           (reference "R36") (unit 1)
         )
@@ -1567,7 +1555,7 @@
     (property "Value" "2.2uF" (at 209.55 98.171 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "LED_SMD:LED_0603_1608Metric" (at 206.7052 101.6 0)
+    (property "Footprint" "Capacitor_SMD:C_0603_1608Metric" (at 206.7052 101.6 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Datasheet" "~" (at 205.74 97.79 0)

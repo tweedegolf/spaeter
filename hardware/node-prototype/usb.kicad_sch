@@ -832,7 +832,7 @@
       (property "Footprint" "Package_TO_SOT_SMD:SOT-23" (at 5.08 -1.905 0)
         (effects (font (size 1.27 1.27) italic) (justify left) hide)
       )
-      (property "Datasheet" "https://www.onsemi.com/pub/Collateral/NDS7002A-D.PDF" (at 0 0 0)
+      (property "Datasheet" "https://www.onsemi.com/pub/Collateral/NDS7002A-D.PDF" (at 5.08 -3.81 0)
         (effects (font (size 1.27 1.27)) (justify left) hide)
       )
       (property "ki_keywords" "N-Channel Switching MOSFET" (at 0 0 0)
@@ -980,7 +980,7 @@
       (property "Footprint" "Package_TO_SOT_SMD:SOT-23" (at 5.08 -1.905 0)
         (effects (font (size 1.27 1.27) italic) (justify left) hide)
       )
-      (property "Datasheet" "http://www.aosmd.com/pdfs/datasheet/AO3401A.pdf" (at 0 0 0)
+      (property "Datasheet" "http://www.aosmd.com/pdfs/datasheet/AO3401A.pdf" (at 5.08 -3.81 0)
         (effects (font (size 1.27 1.27)) (justify left) hide)
       )
       (property "ki_keywords" "P-Channel MOSFET" (at 0 0 0)
@@ -2081,7 +2081,7 @@
   (symbol (lib_id "Device:C") (at 41.91 176.53 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 1c2b0072-fb1d-4beb-b3fe-7abb7a7f8e4a)
-    (property "Reference" "C28" (at 45.72 175.26 0)
+    (property "Reference" "C37" (at 45.72 175.26 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
     (property "Value" "100nF" (at 45.72 177.8 0)
@@ -2097,9 +2097,6 @@
     (pin "2" (uuid 85c8e376-c947-4f9e-b601-84ea35573170))
     (instances
       (project "node-prototype"
-        (path "/294f7425-8100-4c88-a430-3b04b29ed98a/83d2f1ea-2c2d-456e-b4de-3b699a617e5f"
-          (reference "C28") (unit 1)
-        )
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/26ca9a5e-f22a-4e8c-b466-3b51796974e4"
           (reference "C37") (unit 1)
         )
@@ -2223,7 +2220,7 @@
   (symbol (lib_id "power:GND") (at 41.91 182.88 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 39f60adf-811e-45a1-8bd0-458f4763ca61)
-    (property "Reference" "#PWR024" (at 41.91 189.23 0)
+    (property "Reference" "#PWR073" (at 41.91 189.23 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Value" "GND" (at 41.91 187.325 0)
@@ -2238,9 +2235,6 @@
     (pin "1" (uuid 78588212-f1a3-40c7-8903-bcad0819c9fa))
     (instances
       (project "node-prototype"
-        (path "/294f7425-8100-4c88-a430-3b04b29ed98a/83d2f1ea-2c2d-456e-b4de-3b699a617e5f"
-          (reference "#PWR024") (unit 1)
-        )
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/26ca9a5e-f22a-4e8c-b466-3b51796974e4"
           (reference "#PWR073") (unit 1)
         )
@@ -2577,7 +2571,7 @@
   (symbol (lib_id "power:VDD") (at 27.94 170.18 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 9cce0f19-3a4b-42db-8704-f56917334260)
-    (property "Reference" "#PWR023" (at 27.94 173.99 0)
+    (property "Reference" "#PWR070" (at 27.94 173.99 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Value" "VDD" (at 27.94 165.735 0)
@@ -2592,9 +2586,6 @@
     (pin "1" (uuid ee7dcdff-0f6f-4e46-9243-eddf984a59e9))
     (instances
       (project "node-prototype"
-        (path "/294f7425-8100-4c88-a430-3b04b29ed98a/83d2f1ea-2c2d-456e-b4de-3b699a617e5f"
-          (reference "#PWR023") (unit 1)
-        )
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/26ca9a5e-f22a-4e8c-b466-3b51796974e4"
           (reference "#PWR070") (unit 1)
         )
@@ -2865,7 +2856,7 @@
   (symbol (lib_id "Device:C") (at 27.94 176.53 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid ce046990-7b22-409e-b71b-06e8c66643f0)
-    (property "Reference" "C28" (at 31.75 175.26 0)
+    (property "Reference" "C36" (at 31.75 175.26 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
     (property "Value" "100nF" (at 31.75 177.8 0)
@@ -2881,9 +2872,6 @@
     (pin "2" (uuid b8eab38d-19b5-4b41-8249-4a94091eb9bc))
     (instances
       (project "node-prototype"
-        (path "/294f7425-8100-4c88-a430-3b04b29ed98a/83d2f1ea-2c2d-456e-b4de-3b699a617e5f"
-          (reference "C28") (unit 1)
-        )
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/26ca9a5e-f22a-4e8c-b466-3b51796974e4"
           (reference "C36") (unit 1)
         )
@@ -2945,7 +2933,7 @@
   (symbol (lib_id "power:VDD") (at 41.91 170.18 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid d643102c-66ae-4980-b6c4-5304f724cfce)
-    (property "Reference" "#PWR023" (at 41.91 173.99 0)
+    (property "Reference" "#PWR072" (at 41.91 173.99 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Value" "VDD" (at 41.91 165.735 0)
@@ -2960,9 +2948,6 @@
     (pin "1" (uuid 72b66261-c9a9-40d4-80c2-7bf68ad22bd8))
     (instances
       (project "node-prototype"
-        (path "/294f7425-8100-4c88-a430-3b04b29ed98a/83d2f1ea-2c2d-456e-b4de-3b699a617e5f"
-          (reference "#PWR023") (unit 1)
-        )
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/26ca9a5e-f22a-4e8c-b466-3b51796974e4"
           (reference "#PWR072") (unit 1)
         )
@@ -2973,7 +2958,7 @@
   (symbol (lib_id "power:GND") (at 27.94 182.88 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid dba5da09-1a26-4f91-9108-1e266bc28c8d)
-    (property "Reference" "#PWR024" (at 27.94 189.23 0)
+    (property "Reference" "#PWR071" (at 27.94 189.23 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Value" "GND" (at 27.94 187.325 0)
@@ -2988,9 +2973,6 @@
     (pin "1" (uuid ce802060-436e-4fcf-8acb-c954c34e64f0))
     (instances
       (project "node-prototype"
-        (path "/294f7425-8100-4c88-a430-3b04b29ed98a/83d2f1ea-2c2d-456e-b4de-3b699a617e5f"
-          (reference "#PWR024") (unit 1)
-        )
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/26ca9a5e-f22a-4e8c-b466-3b51796974e4"
           (reference "#PWR071") (unit 1)
         )

@@ -3871,7 +3871,7 @@
     (property "Value" "C2990414" (at 184.15 71.12 90)
       (effects (font (size 1.27 1.27)) (justify right))
     )
-    (property "Footprint" "" (at 181.61 69.85 0)
+    (property "Footprint" "Diode_SMD:D_SMC" (at 181.61 69.85 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Datasheet" "~" (at 181.61 69.85 0)

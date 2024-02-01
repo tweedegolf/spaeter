@@ -4419,8 +4419,8 @@
     (property "Datasheet" "~" (at 133.35 83.82 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 9930e989-3c3a-463c-bc2e-861dd22d2322))
-    (pin "2" (uuid 9e82a0ef-8edc-4aba-9d42-2dda05ebbd97))
+    (pin "1" (uuid 3e716575-d336-4e08-89b7-b7b28baba24b))
+    (pin "2" (uuid 45a2d01a-f1d4-4d33-82f4-d1aceaf86257))
     (instances
       (project "node-prototype"
         (path "/294f7425-8100-4c88-a430-3b04b29ed98a/d335e7cb-f5f7-4d8e-8053-090b693e4986"

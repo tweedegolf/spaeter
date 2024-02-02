@@ -1129,7 +1129,7 @@
   )
 
   (symbol (lib_id "Connector:TestPoint") (at 162.56 71.755 0) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 01901799-c6dc-492b-a87d-5c48d8c9d9a9)
     (property "Reference" "TP2" (at 165.1 67.183 0)
       (effects (font (size 1.27 1.27)) (justify left))
@@ -1284,7 +1284,7 @@
   )
 
   (symbol (lib_id "Connector:TestPoint") (at 71.755 128.27 0) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 3cd8dee3-b027-407f-8bef-f50413bfc53f)
     (property "Reference" "TP2" (at 74.295 123.698 0)
       (effects (font (size 1.27 1.27)) (justify left))
@@ -1725,7 +1725,7 @@
   )
 
   (symbol (lib_id "Device:Microphone_Condenser") (at 68.58 135.89 0) (mirror x) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no)
+    (in_bom yes) (on_board yes) (dnp yes)
     (uuid 9f576d67-dad7-4868-9871-09cd16cd1183)
     (property "Reference" "MK1" (at 62.23 135.89 90)
       (effects (font (size 1.27 1.27)))
@@ -1802,7 +1802,7 @@
   )
 
   (symbol (lib_id "Connector:TestPoint") (at 201.93 99.06 0) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid bb11afb8-e280-4201-b0e8-c642499175b0)
     (property "Reference" "TP2" (at 204.47 94.488 0)
       (effects (font (size 1.27 1.27)) (justify left))

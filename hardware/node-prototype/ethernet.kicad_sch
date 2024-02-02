@@ -3279,7 +3279,7 @@
   )
 
   (symbol (lib_id "Connector:TestPoint") (at 116.84 142.24 0) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 1a3566e4-0bed-4536-8c5e-5fe08d2cd02b)
     (property "Reference" "TP2" (at 119.38 138.938 0)
       (effects (font (size 1.27 1.27)) (justify left))
@@ -3332,7 +3332,7 @@
   )
 
   (symbol (lib_id "Connector:TestPoint") (at 36.83 92.71 0) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 22c1ba72-8e57-47a6-815f-9d4c9344b150)
     (property "Reference" "TP2" (at 39.37 88.138 0)
       (effects (font (size 1.27 1.27)) (justify left))
@@ -3565,7 +3565,7 @@
   )
 
   (symbol (lib_id "MYBSP01201ABF_MYBSP00502ABF:MYBSP00502ABF") (at 127 157.48 0) (mirror y) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no)
+    (in_bom yes) (on_board yes) (dnp yes)
     (uuid 39620d74-fedd-49d8-bed5-6952971e7e83)
     (property "Reference" "U3" (at 127 140.335 0)
       (effects (font (size 1.27 1.27)))
@@ -3619,7 +3619,7 @@
   )
 
   (symbol (lib_id "Connector:RJ45_Abracon_ARJP11A-MASA-B-A-EMU2") (at 220.98 38.1 0) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom yes) (on_board yes) (dnp yes) (fields_autoplaced)
     (uuid 44b6661b-4d32-4492-b3e4-9d7c322be95e)
     (property "Reference" "J1" (at 222.25 21.59 0)
       (effects (font (size 1.27 1.27)))
@@ -3735,7 +3735,7 @@
   )
 
   (symbol (lib_id "Connector:TestPoint") (at 137.16 152.4 180) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom no) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid 51c6be9e-2db4-440b-aa26-5dcf173b9192)
     (property "Reference" "TP2" (at 139.7 155.702 0)
       (effects (font (size 1.27 1.27)) (justify right))
@@ -4224,7 +4224,7 @@
   )
 
   (symbol (lib_id "Device:D_TVS") (at 143.51 147.32 90) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom yes) (on_board yes) (dnp yes) (fields_autoplaced)
     (uuid 99369a58-fb98-48ec-ba14-de9e187fc5d5)
     (property "Reference" "D1" (at 146.05 146.05 90)
       (effects (font (size 1.27 1.27)) (justify right))
@@ -4376,7 +4376,7 @@
   )
 
   (symbol (lib_id "Device:Fuse") (at 149.86 142.24 90) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no)
+    (in_bom yes) (on_board yes) (dnp yes)
     (uuid b7655918-8930-4006-8a77-2295d1a20c16)
     (property "Reference" "F1" (at 149.86 137.16 90)
       (effects (font (size 1.27 1.27)))
@@ -4485,7 +4485,7 @@
   )
 
   (symbol (lib_id "Connector:TestPoint") (at 137.16 142.24 0) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no)
+    (in_bom no) (on_board yes) (dnp no)
     (uuid c470a37b-0be0-42c0-9e39-ce77dcd1101b)
     (property "Reference" "TP2" (at 132.08 139.065 0)
       (effects (font (size 1.27 1.27)) (justify left))

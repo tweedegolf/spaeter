@@ -1834,7 +1834,7 @@
   )
 
   (symbol (lib_id "Connector:Conn_Coaxial") (at 58.42 67.31 0) (mirror y) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom yes) (on_board yes) (dnp yes) (fields_autoplaced)
     (uuid a625017c-a122-4e49-8099-bc914c788f1c)
     (property "Reference" "J5" (at 58.7374 60.325 0)
       (effects (font (size 1.27 1.27)))
@@ -2014,7 +2014,7 @@
   )
 
   (symbol (lib_id "Connector_Generic:Conn_01x03") (at 58.42 109.22 0) (mirror y) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom yes) (on_board yes) (dnp yes) (fields_autoplaced)
     (uuid ba655b48-386f-43c9-a519-36e33541a0a9)
     (property "Reference" "J6" (at 58.42 100.33 0)
       (effects (font (size 1.27 1.27)))
@@ -2070,7 +2070,7 @@
   )
 
   (symbol (lib_id "Connector:Conn_Coaxial") (at 78.105 90.805 0) (mirror y) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom yes) (on_board yes) (dnp yes) (fields_autoplaced)
     (uuid be9e867e-ec2c-40e8-956f-beb8f08354a6)
     (property "Reference" "J7" (at 78.4224 83.82 0)
       (effects (font (size 1.27 1.27)))

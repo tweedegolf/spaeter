@@ -543,14 +543,16 @@ mod app {
                         connected.then_some("✅").unwrap_or("❌")
                     );
                 }
-                match net.mqtt.poll(|_, topic, payload, properties| {
+
+                let poll_result = net.mqtt.poll(|_, topic, payload, properties| {
                     defmt::info!(
                         "Received MQTT message. Topic: {}, payload: '{}', properties: {:?}",
                         topic,
                         core::str::from_utf8(payload).unwrap_or("<GIBBERISH>"),
                         Debug2Format(&properties)
                     );
-                }) {
+                });
+                match poll_result {
                     Ok(res) => res.is_some(),
                     Err(e) => {
                         defmt::error!("MQTT Poll error: {:?}", Debug2Format(&e));
@@ -598,7 +600,7 @@ mod app {
 
     #[task(
         local = [
-            signal_detector: signal_detector::SignalDetector = signal_detector::SignalDetector::new(54545.454545454545454545)
+            signal_detector: signal_detector::SignalDetector = signal_detector::SignalDetector::new(54545.454)
         ],
         shared = [net, observations],
         priority = 0,
@@ -649,7 +651,10 @@ mod app {
                                 Systick::delay(1u64.millis()).await;
                             }
                             e => {
-                                defmt::warn!("Could not publish signal peak: {}", defmt::Debug2Format(&e));
+                                defmt::warn!(
+                                    "Could not publish signal peak: {}",
+                                    defmt::Debug2Format(&e)
+                                );
                                 break;
                             }
                         },

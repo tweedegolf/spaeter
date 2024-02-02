@@ -22,7 +22,7 @@ pub fn signal_peak_topic(
     s
 }
 pub fn parse_signal_peak_topic(topic: &str) -> Option<AnchorId> {
-    let (l, r) = SIGNAL_PEAK_TOPIC.split_once("+").unwrap();
+    let (l, r) = SIGNAL_PEAK_TOPIC.split_once('+').unwrap();
 
     let anchor_string = topic.strip_prefix(l)?.strip_suffix(r)?;
 

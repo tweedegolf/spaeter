@@ -1,0 +1,21 @@
+name: CI
+
+on:
+    push:
+      branches:
+        - main
+    # Run on any PR
+    pull_request:
+  
+jobs:
+  version-matrix:
+    strategy:
+      # super important if you want to see all results, even if one fails
+      # fail-fast is true by default
+      fail-fast: false
+      matrix:
+        working-directory: [core, fake-anchors, firmware, frontend, server, signal-detector]
+    uses: ./.github/workflows/common-workflow.yaml # calls the one above ^
+    with:
+      working-directory: ${{ matrix.working-directory }}
+    secrets: inherit

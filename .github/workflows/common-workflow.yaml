@@ -1,0 +1,34 @@
+name: Common-Workflow
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        required: true
+        type: string
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: dtolnay/rust-toolchain@stable
+    - working-directory: ${{ inputs.working-directory }}
+      run: cargo fmt --all -- --check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: dtolnay/rust-toolchain@stable
+    - run: sudo apt-get install -y libasound2-dev pkg-config mold clang libudev-dev # Required for frontend
+    - working-directory: ${{ inputs.working-directory }}
+      run: cargo test --target x86_64-unknown-linux-gnu
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: dtolnay/rust-toolchain@stable
+    - run: sudo apt-get install -y libasound2-dev pkg-config mold clang libudev-dev # Required for frontend
+    - working-directory: ${{ inputs.working-directory }}
+      run: cargo clippy -- -D warnings

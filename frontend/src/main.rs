@@ -1,14 +1,9 @@
 use std::{
-    borrow::BorrowMut,
     collections::VecDeque,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use bevy::{
-    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
-    pbr::NotShadowCaster,
-    prelude::*,
-};
+use bevy::{diagnostic::LogDiagnosticsPlugin, pbr::NotShadowCaster, prelude::*};
 use bevy_flycam::prelude::*;
 use bevy_inspector_egui::{
     prelude::ReflectInspectorOptions, quick::WorldInspectorPlugin, InspectorOptions,
@@ -113,7 +108,8 @@ fn mqtt_update(
                     base_color: Color::hsla(
                         detected_location.frequency / 40_000.0 * 360.0,
                         (detected_location.confidence / stats.high_confidence_value())
-                            .clamp(0.0, 1.0).sqrt(),
+                            .clamp(0.0, 1.0)
+                            .sqrt(),
                         0.5,
                         (detected_location.confidence / stats.high_confidence_value())
                             .clamp(0.0, 1.0),
@@ -181,8 +177,8 @@ fn location_sphere_runner(
             .timestamp
             .difference_to(Timestamp::new(current_time.as_nanos() as u64, 0))
             .as_micros() as f32
-            / (MAX_AGE_SECS * 1_000_000.0) / confidence.sqrt();
-
+            / (MAX_AGE_SECS * 1_000_000.0)
+            / confidence.sqrt();
 
         if age >= 1.0 {
             commands.entity(entity).despawn();

@@ -67,7 +67,7 @@ fn main() {
             for anchor in fake_anchors.iter_mut() {
                 let id = anchor.id;
 
-                let mut test_samples = test_samples.clone();
+                let mut test_samples = test_samples;
                 add_random_noise(&mut test_samples, 0.1);
 
                 anchor.feed(
@@ -97,7 +97,7 @@ fn main() {
         }
     });
 
-    while let Ok(_) = connection.recv_timeout(Duration::from_millis(600)) {}
+    while connection.recv_timeout(Duration::from_millis(600)).is_ok() {}
 }
 
 struct FakeAnchor {

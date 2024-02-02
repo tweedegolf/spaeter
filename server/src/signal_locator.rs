@@ -67,7 +67,7 @@ impl SignalLocator {
             .for_each(|(_, confidence)| *confidence = *confidence * average_magnitude / 1000.0);
         locations.retain(|(_, confidence)| *confidence > 1.0);
 
-        if locations.len() > 0 {
+        if !locations.is_empty() {
             log::info!(
                 "Found locations. time: {earliest_signal:?}, freq: {:7.1}, locations:\n{locations:5.2?}",
                 correlated_signals.first().unwrap().1.average_frequency()

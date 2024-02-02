@@ -43,8 +43,8 @@ impl AdcCapture {
         tim2: pac::TIM2,
         dma2: pac::DMA2,
         apb1: &mut APB1,
-        apb2: &mut rcc::APB2,
-        ahb1: &mut rcc::AHB1,
+        apb2: &mut APB2,
+        ahb1: &mut AHB1,
         clocks: &Clocks,
     ) -> (Self, HertzU32, HertzU32) {
         let mut this = Self {

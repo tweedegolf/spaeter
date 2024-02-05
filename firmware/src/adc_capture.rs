@@ -3,7 +3,7 @@ mod ring_buffer;
 use fugit::HertzU32;
 use hal::{
     pac,
-    rcc::{self, BusClock, BusTimerClock, Clocks, Enable, Reset, APB1, APB2},
+    rcc::{self, BusClock, BusTimerClock, Clocks, Enable, Reset, AHB1, APB1, APB2},
 };
 use stm32f7xx_hal as hal;
 

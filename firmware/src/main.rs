@@ -711,7 +711,7 @@ mod app {
             cx.shared.tx_waker.lock(|tx_waker| tx_waker.wake());
         }
 
-        let ptp_target_time = cx.local.ptp_target_time;
+        let ptp_target_time: &mut Timestamp = cx.local.ptp_target_time;
         if reason.time_passed {
             // Safety: CCR1 is a read-only register, so we can safely read it from anywhere
             let tim2_count = unsafe { (*pac::TIM2::ptr()).ccr1.read().ccr().bits() };

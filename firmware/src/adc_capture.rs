@@ -29,6 +29,8 @@ pub struct AdcCapture {
     dma2: pac::DMA2,
     buffer: DoubleBufferedRingBuffer,
     next_done: StreamMemoryBank,
+    pub(crate) adc_clk: HertzU32,
+    pub(crate) tim2_clk: HertzU32,
 }
 
 impl AdcCapture {
@@ -46,7 +48,7 @@ impl AdcCapture {
         apb2: &mut APB2,
         ahb1: &mut AHB1,
         clocks: &Clocks,
-    ) -> (Self, HertzU32, HertzU32) {
+    ) -> Self {
         let mut this = Self {
             adc_common,
             adc1,
@@ -54,13 +56,19 @@ impl AdcCapture {
             dma2,
             buffer: DoubleBufferedRingBuffer::new(buffer),
             next_done: StreamMemoryBank::Bank0,
+            adc_clk: HertzU32::Hz(0),
+            tim2_clk: HertzU32::Hz(0),
         };
 
         this.init_dma2(ahb1);
-        let adc_hertz = this.init_adc1(apb2, clocks);
-        let tim_hertz = this.init_tim2(apb1, clocks);
+        this.init_adc1(apb2, clocks);
+        this.init_tim2(apb1, clocks);
 
-        (this, adc_hertz, tim_hertz)
+        // Inits should also have initialized clock rates
+        assert_ne!(this.adc_clk, HertzU32::Hz(0));
+        assert_ne!(this.tim2_clk, HertzU32::Hz(0));
+
+        this
     }
 
     /// Configure DMA2 Stream 0 to read 16-bit conversions from ADC1
@@ -143,7 +151,7 @@ impl AdcCapture {
     /// Configure ADC1 to 12-bits resolution in
     /// single conversion mode and to be triggered externally from TIM2 TRGO
     /// and read out using DMA
-    fn init_adc1(&mut self, apb2: &mut APB2, clocks: &Clocks) -> HertzU32 {
+    fn init_adc1(&mut self, apb2: &mut APB2, clocks: &Clocks) {
         let adc1 = &self.adc1;
         <pac::ADC1 as Enable>::enable(apb2);
         // Power down ADC1
@@ -178,11 +186,11 @@ impl AdcCapture {
         // Power up ADC1
         adc1.cr2.modify(|_, w| w.adon().enabled());
 
-        APB2::clock(clocks) / 4
+        self.adc_clk = APB2::clock(clocks) / 4;
     }
 
     /// Setup TIM2 to trigger ADC1 using TRGO on update event generation
-    fn init_tim2(&mut self, apb1: &mut APB1, clocks: &Clocks) -> HertzU32 {
+    fn init_tim2(&mut self, apb1: &mut APB1, clocks: &Clocks) {
         let tim2 = &self.tim2;
         <pac::TIM2 as Enable>::enable(apb1);
         // Set Master mode trigger on timer enable, which will enable ADC1 as well
@@ -212,7 +220,7 @@ impl AdcCapture {
         // Enable CC1
         tim2.ccer.modify(|_, w| w.cc1e().set_bit());
 
-        APB1::timer_clock(clocks)
+        self.tim2_clk = APB1::timer_clock(clocks);
     }
 
     pub fn dma_interrupt_handler(&mut self) {

@@ -160,7 +160,7 @@ mod app {
         defmt::println!("Going to do scary stuff now");
 
         let adc_conversion_data = ADC_CONVERSION_DATA.init_with(|| core::array::from_fn(|_| 0));
-        let (adc_capture, adc_clk, tim2_clk) = AdcCapture::init(
+        let adc_capture = AdcCapture::init(
             adc_conversion_data,
             p.ADC_COMMON,
             p.ADC1,
@@ -295,7 +295,7 @@ mod app {
                 net,
                 ptp_port,
                 tx_waker: WakerRegistration::new(),
-                observations: TimerObservations::new(tim2_clk, adc_clk),
+                observations: TimerObservations::new(&adc_capture),
             },
             Local {
                 adc_capture,

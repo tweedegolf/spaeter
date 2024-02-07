@@ -666,9 +666,24 @@ mod app {
 
     #[task(binds = TIM2, priority = 3)]
     fn on_tim2_update(_cx: on_tim2_update::Context) {
+        // Safety: we only read and clear bits in the status register. This register is only used in this ISR.
         let tim2 = unsafe { &*pac::TIM2::ptr() };
-        tim2.sr.modify(|r, w| unsafe { w.bits(!r.bits()) });
-        TIM2_OVERFLOWS.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        let status_register = &tim2.sr;
+
+        let status = status_register.read();
+
+        // Clear events by writing a zero bit to all handled events
+        status_register.write(|w| unsafe { w.bits(!status.bits()) });
+
+        // Update interrupt flag. For TIM2 this is set on over-/underflow.
+        if status.uif().is_update_pending() {
+            TIM2_OVERFLOWS.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        }
+
+        // Capture channel 1 event. This is caused by a PTP alarm
+        if status.cc1if().bit_is_set() {
+            // Handled in Ethernet Interrupt
+        }
     }
 
     #[task(binds = ADC, priority = 1)]
@@ -689,12 +704,6 @@ mod app {
     fn eth_interrupt(mut cx: eth_interrupt::Context) {
         const INTERVAL: Timestamp = Timestamp::new(false, 1, Subseconds::ZERO);
 
-        let tim2_count = unsafe { (*pac::TIM2::ptr()).cnt.read().cnt().bits() };
-        let tim2_time = TimerValue(
-            ((TIM2_OVERFLOWS.load(core::sync::atomic::Ordering::SeqCst) as u64) << 32)
-                | tim2_count as u64,
-        );
-
         let reason = stm32_eth::eth_interrupt_handler();
 
         // Receiving a tx event wakes the task waiting for tx timestamps
@@ -702,28 +711,31 @@ mod app {
             cx.shared.tx_waker.lock(|tx_waker| tx_waker.wake());
         }
 
+        let ptp_target_time = cx.local.ptp_target_time;
         if reason.time_passed {
-            defmt::info!("Timestamp trigger !!@#!@#");
+            // Safety: CCR1 is a read-only register, so we can safely read it from anywhere
+            let tim2_count = unsafe { (*pac::TIM2::ptr()).ccr1.read().ccr().bits() };
+            let tim2_time = TimerValue(
+                ((TIM2_OVERFLOWS.load(core::sync::atomic::Ordering::SeqCst) as u64) << 32)
+                    | tim2_count as u64,
+            );
 
             cx.shared.observations.lock(|observations| {
-                observations.push(tim2_time, stm_time_to_statime(*cx.local.ptp_target_time))
+                observations.push(tim2_time, stm_time_to_statime(*ptp_target_time))
             });
+        }
 
-            let now = EthernetPTP::now();
+        // The alarm has never been set
+        let never_set = *ptp_target_time == Timestamp::new_raw(0);
+        // The clock jumped backwards
+        let alarm_too_far_away = (*ptp_target_time - EthernetPTP::now()).raw() > INTERVAL.raw();
 
-            *cx.local.ptp_target_time += INTERVAL;
-
-            if cx.local.ptp_target_time.raw() < now.raw() {
-                *cx.local.ptp_target_time = now + INTERVAL;
-            }
-
+        // Set a new alarm
+        if reason.time_passed || never_set || alarm_too_far_away {
+            *ptp_target_time = EthernetPTP::now() + INTERVAL;
             cx.local
                 .ptp_clock
-                .access(|clock| clock.configure_target_time_interrupt(*cx.local.ptp_target_time));
-        } else if *cx.local.ptp_target_time == Timestamp::new_raw(0) {
-            cx.local.ptp_clock.access(|clock| {
-                clock.configure_target_time_interrupt(EthernetPTP::now() + INTERVAL)
-            });
+                .access(|clock| clock.configure_target_time_interrupt(*ptp_target_time));
         }
 
         // Let smoltcp handle any new packets

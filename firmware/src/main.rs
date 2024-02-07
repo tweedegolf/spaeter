@@ -295,7 +295,7 @@ mod app {
                 net,
                 ptp_port,
                 tx_waker: WakerRegistration::new(),
-                observations: TimerObservations::new(&adc_capture),
+                observations: TimerObservations::from_capture(&adc_capture),
             },
             Local {
                 adc_capture,

@@ -1,11 +1,13 @@
 #![allow(dead_code)]
+
+use defmt::Debug2Format;
 use fugit::RateExtU32;
-#[cfg(feature = "eth")]
 use stm32_eth::dma::{RxRingEntry, TxRingEntry};
 use stm32_eth::{mac, EthPins};
 use stm32f7xx_hal::gpio::{Alternate, Analog, DynamicPin, GpioExt, Output, Pin, Speed};
 use stm32f7xx_hal::otg_fs::USB;
 use stm32f7xx_hal::pac::{Peripherals, TIM4, USART3};
+use stm32f7xx_hal::prelude::_embedded_hal_serial_Write;
 use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode, RccExt, PLL48CLK};
 use stm32f7xx_hal::serial::Serial;
 use stm32f7xx_hal::timer::{PwmChannel, PwmExt};
@@ -45,18 +47,21 @@ pub struct Board {
     pub psu: PowerSupply,
     pub timing: Timing,
     pub uart: Serial<USART3, (Pin<'D', 8, Alternate<7>>, Pin<'D', 9, Alternate<7>>)>,
-    #[cfg(feature = "usb")]
-    pub usb: USB,
-    #[cfg(feature = "eth")]
-    pub eth: stm32_eth::Parts<
-        'static,
-        'static,
-        mac::EthernetMACWithMii<Pin<'A', 2, Alternate<11>>, Pin<'C', 1, Alternate<11>>>,
+    pub usb: Option<USB>,
+    pub eth: Option<
+        stm32_eth::Parts<
+            'static,
+            'static,
+            mac::EthernetMACWithMii<Pin<'A', 2, Alternate<11>>, Pin<'C', 1, Alternate<11>>>,
+        >,
     >,
 }
 
-pub fn setup_board(p: Peripherals) -> Board {
+pub fn setup_board(p: Peripherals, init_eth: bool, init_usb: bool) -> Board {
+    defmt::info!("Constraining RCC");
     let rcc = p.RCC.constrain();
+
+    defmt::info!("Setting up clocks");
     let clocks = rcc
         .cfgr
         .hse(HSEClock::new(25.MHz(), HSEClockMode::Oscillator))
@@ -64,6 +69,7 @@ pub fn setup_board(p: Peripherals) -> Board {
         .use_pll48clk(PLL48CLK::Pllq)
         .sysclk(216.MHz())
         .freeze();
+    defmt::info!("Clocks setup: {:?}", Debug2Format(&clocks));
 
     let gpioa = p.GPIOA.split();
     let gpiob = p.GPIOB.split();
@@ -80,6 +86,7 @@ pub fn setup_board(p: Peripherals) -> Board {
         let max = pwm.get_max_duty();
         pwm.set_duty(max / 2);
         pwm.enable();
+        defmt::info!("PWM out activated");
 
         pwm
     };
@@ -95,7 +102,9 @@ pub fn setup_board(p: Peripherals) -> Board {
         enable: gpioa.pa4.into_push_pull_output(),
         gain: gpioa.pa6.into_dynamic(),
         ar: gpioe.pe2.into_dynamic(),
-    };
+    }
+    .enable();
+    defmt::info!("Enabled mic");
 
     let psu = PowerSupply {
         poe: gpioa.pa8,
@@ -115,18 +124,24 @@ pub fn setup_board(p: Peripherals) -> Board {
         &clocks,
         Default::default(),
     );
+    defmt::info!("UART ready, sending Moin");
+    uart.write_str("Moin\n").unwrap();
 
-    #[cfg(feature = "usb")]
-    let usb = USB::new(
-        p.OTG_FS_GLOBAL,
-        p.OTG_FS_DEVICE,
-        p.OTG_FS_PWRCLK,
-        (gpioa.pa11.into_alternate(), gpioa.pa12.into_alternate()),
-        &clocks,
-    );
+    let usb = if init_usb {
+        defmt::info!("Setting up USB");
+        Some(USB::new(
+            p.OTG_FS_GLOBAL,
+            p.OTG_FS_DEVICE,
+            p.OTG_FS_PWRCLK,
+            (gpioa.pa11.into_alternate(), gpioa.pa12.into_alternate()),
+            &clocks,
+        ))
+    } else {
+        None
+    };
 
-    #[cfg(feature = "eth")]
-    let eth = {
+    let eth = if init_eth {
+        defmt::info!("Setting up eth");
         let eth_pins = {
             let ref_clk = gpioa.pa1.into_floating_input();
             let crs = gpioa.pa7.into_floating_input(); // NOTE: wrong connected on board, apply BODGE!
@@ -177,23 +192,25 @@ pub fn setup_board(p: Peripherals) -> Board {
 
         parts.dma.enable_interrupt();
 
-        parts
+        Some(parts)
+    } else {
+        None
     };
+
+    defmt::info!("Board setup done!");
 
     Board {
         ui,
-        mic: mic.enable(),
+        mic,
         psu,
         timing,
         uart,
-        #[cfg(feature = "usb")]
         usb,
-        #[cfg(feature = "eth")]
         eth,
     }
 }
 
 pub fn main() {
     let p = Peripherals::take().unwrap();
-    let _todo = setup_board(p);
+    let _todo = setup_board(p, false, false);
 }

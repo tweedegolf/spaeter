@@ -8,6 +8,10 @@ edition = "2021"
 [dependencies]
 defmt = "0.3.6"
 fugit = "0.3.7"
-smoltcp = { version = "0.10.0", features = ["proto-ipv4", "proto-ipv6"] }
+smoltcp = { version = "0.10.0", default-features = false, features = ["proto-ipv4", "proto-ipv6"] }
 stm32-eth = { version = "0.5.2", features = ["stm32f767", "smoltcp-phy"] }
 stm32f7xx-hal = { version = "0.7.0", features = ["usb_fs", "stm32f767"] }
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7.3"
+defmt-rtt = "0.4.0"

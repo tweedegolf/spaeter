@@ -1,16 +1,21 @@
+#![no_std]
+#![no_main]
 #![allow(dead_code)]
 
 use defmt::Debug2Format;
 use fugit::RateExtU32;
 use stm32_eth::dma::{RxRingEntry, TxRingEntry};
 use stm32_eth::{mac, EthPins};
-use stm32f7xx_hal::gpio::{Alternate, Analog, DynamicPin, GpioExt, Output, Pin, Speed};
+use stm32f7xx_hal::gpio::{Alternate, Analog, DynamicPin, Output, Pin, Speed};
 use stm32f7xx_hal::otg_fs::USB;
-use stm32f7xx_hal::pac::{Peripherals, TIM4, USART3};
-use stm32f7xx_hal::prelude::_embedded_hal_serial_Write;
-use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode, RccExt, PLL48CLK};
+use stm32f7xx_hal::pac::{CorePeripherals, Peripherals, TIM4, USART3};
+use stm32f7xx_hal::prelude::*;
+use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode, PLL48CLK};
 use stm32f7xx_hal::serial::Serial;
-use stm32f7xx_hal::timer::{PwmChannel, PwmExt};
+use stm32f7xx_hal::timer::{PwmChannel, SysDelay};
+
+use defmt_rtt as _;
+use panic_probe as _;
 
 pub mod mic;
 
@@ -55,20 +60,25 @@ pub struct Board {
             mac::EthernetMACWithMii<Pin<'A', 2, Alternate<11>>, Pin<'C', 1, Alternate<11>>>,
         >,
     >,
+    pub delay: SysDelay,
 }
 
-pub fn setup_board(p: Peripherals, init_eth: bool, init_usb: bool) -> Board {
+pub fn setup_board(p: Peripherals, cp: CorePeripherals, init_eth: bool, init_usb: bool) -> Board {
     defmt::info!("Constraining RCC");
     let rcc = p.RCC.constrain();
 
     defmt::info!("Setting up clocks");
-    let clocks = rcc
-        .cfgr
-        .hse(HSEClock::new(25.MHz(), HSEClockMode::Oscillator))
-        .use_pll()
-        .use_pll48clk(PLL48CLK::Pllq)
-        .sysclk(216.MHz())
-        .freeze();
+    let real_board = false;
+    let clocks = if real_board {
+        rcc.cfgr
+            .hse(HSEClock::new(25.MHz(), HSEClockMode::Oscillator))
+            .use_pll()
+            .use_pll48clk(PLL48CLK::Pllq)
+            .sysclk(216.MHz())
+            .freeze()
+    } else {
+        rcc.cfgr.freeze()
+    };
     defmt::info!("Clocks setup: {:?}", Debug2Format(&clocks));
 
     let gpioa = p.GPIOA.split();
@@ -86,7 +96,7 @@ pub fn setup_board(p: Peripherals, init_eth: bool, init_usb: bool) -> Board {
         let max = pwm.get_max_duty();
         pwm.set_duty(max / 2);
         pwm.enable();
-        defmt::info!("PWM out activated");
+        defmt::info!("PWM out activated... blue led now is at 1kHz 50% duty");
 
         pwm
     };
@@ -118,14 +128,21 @@ pub fn setup_board(p: Peripherals, init_eth: bool, init_usb: bool) -> Board {
         sync_in_1: gpiob.pb11.into_alternate(),
     };
 
-    let uart = Serial::new(
+    let mut uart = Serial::new(
         p.USART3,
         (gpiod.pd8.into_alternate(), gpiod.pd9.into_alternate()),
         &clocks,
         Default::default(),
     );
     defmt::info!("UART ready, sending Moin");
-    uart.write_str("Moin\n").unwrap();
+    for &byte in b"Moin\n" {
+        loop {
+            match uart.write(byte) {
+                Ok(_) => break,
+                Err(e) => continue,
+            }
+        }
+    }
 
     let usb = if init_usb {
         defmt::info!("Setting up USB");
@@ -189,6 +206,7 @@ pub fn setup_board(p: Peripherals, init_eth: bool, init_usb: bool) -> Board {
 
         parts.ptp.enable_pps(gpiob.pb5.into_push_pull_output());
         parts.ptp.set_pps_freq(4);
+        defmt::info!("Enabled PPS output at 16Hz");
 
         parts.dma.enable_interrupt();
 
@@ -196,6 +214,8 @@ pub fn setup_board(p: Peripherals, init_eth: bool, init_usb: bool) -> Board {
     } else {
         None
     };
+
+    let delay = cp.SYST.delay(&clocks);
 
     defmt::info!("Board setup done!");
 
@@ -207,10 +227,47 @@ pub fn setup_board(p: Peripherals, init_eth: bool, init_usb: bool) -> Board {
         uart,
         usb,
         eth,
+        delay,
     }
 }
 
-pub fn main() {
+#[cortex_m_rt::entry]
+fn main() -> ! {
     let p = Peripherals::take().unwrap();
-    let _todo = setup_board(p, false, false);
+    let cp = CorePeripherals::take().unwrap();
+
+    let mut b = setup_board(p, cp, false, false);
+
+    let mut i = 0u32;
+    let mut btn_pressed = false;
+
+    loop {
+        // Loop slowly...
+        b.delay.delay(fugit::MicrosDurationU32::millis(100));
+
+        // Check button...
+        let btn_high = b.ui.user_btn.is_high();
+        if btn_high != btn_pressed {
+            defmt::info!("Button toggled... is_high={}", btn_high);
+            btn_pressed = btn_high;
+        }
+
+        // Blink LED (1s on/off)
+        if i % 10 == 0 {
+            b.ui.led_red.toggle();
+        }
+
+        // Print power state (every 10s)
+        if i % 100 == 0 {
+            defmt::info!(
+                "Power sources: USB({}), PoE({})",
+                b.psu.usb.is_high(),
+                b.psu.poe.is_high()
+            );
+
+            defmt::info!("User Butt: {}", b.ui.user_btn.is_high());
+        }
+
+        i = i.wrapping_add(1);
+    }
 }

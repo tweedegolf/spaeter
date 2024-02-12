@@ -1,0 +1,18 @@
+[package]
+name = "board-bringup"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["eth", "usb"]
+usb = []
+eth = []
+
+[dependencies]
+defmt = "0.3.6"
+fugit = "0.3.7"
+smoltcp = { version = "0.10.0", features = ["proto-ipv4", "proto-ipv6"] }
+stm32-eth = { version = "0.5.2", features = ["stm32f767", "smoltcp-phy"] }
+stm32f7xx-hal = { version = "0.7.0", features = ["usb_fs", "stm32f767"] }

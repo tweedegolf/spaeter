@@ -1,3 +1,4 @@
+use crate::adc_capture::AdcCapture;
 use core::ops::Div;
 use fixed::types::I96F32;
 use fugit::HertzU32;
@@ -30,9 +31,13 @@ impl TimerObservations {
     const LEN: usize = 128;
 
     // At 12 bits per datasheet
-    const ADCCLK_PER_SAMPLE: u64 = 15;
+    const ADCCLK_PER_SAMPLE: u64 = 15 + 480;
     // assumes the sample is taken exactly at the end
-    const ADCCLK_SAMPLING_TIME: u64 = 3;
+    const ADCCLK_SAMPLING_TIME: u64 = 480;
+
+    pub fn from_capture(adc_capture: &AdcCapture) -> Self {
+        Self::new(adc_capture.tim2_clk, adc_capture.adc_clk)
+    }
 
     pub fn new(tim2_clk: HertzU32, adc_clk: HertzU32) -> Self {
         assert_eq!(tim2_clk.to_Hz() % adc_clk.to_Hz(), 0);

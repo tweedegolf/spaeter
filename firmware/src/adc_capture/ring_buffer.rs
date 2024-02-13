@@ -117,7 +117,7 @@ impl DoubleBufferedRingBuffer {
         CAPTURE_LEN
     }
 
-    fn is_consistend(&self) -> bool {
+    fn is_consistent(&self) -> bool {
         self.app_owned.end() == self.dma_owned.start()
             && self.dma_owned.end() == self.free.start()
             && self.free.end() == self.app_owned.start()
@@ -133,7 +133,7 @@ impl DoubleBufferedRingBuffer {
         };
         self.dma_owned.push_back(grant);
 
-        assert!(self.is_consistend());
+        assert!(self.is_consistent());
         Some(dma)
     }
 
@@ -148,7 +148,7 @@ impl DoubleBufferedRingBuffer {
 
         // Ownership is passed to app
         self.app_owned.push_back(grant);
-        assert!(self.is_consistend());
+        assert!(self.is_consistent());
     }
 
     pub fn first_idx(&self) -> SampleIndex {
@@ -156,7 +156,7 @@ impl DoubleBufferedRingBuffer {
     }
 
     pub fn app_data(&self) -> (&[u16], &[u16]) {
-        assert!(self.is_consistend());
+        assert!(self.is_consistent());
 
         if self.app_owned.len == 0 {
             (&[], &[])
@@ -188,7 +188,7 @@ impl DoubleBufferedRingBuffer {
         let grant = self.app_owned.pop_front(len).unwrap();
         self.free.push_back(grant);
         self.first_idx.0 = self.first_idx.0.wrapping_add(len as u64);
-        assert!(self.is_consistend());
+        assert!(self.is_consistent());
     }
 }
 

@@ -2,6 +2,7 @@
 #![no_std]
 #![feature(type_alias_impl_trait)]
 
+use core::sync::atomic::AtomicU32;
 use core::{pin::pin, task::Poll};
 
 use defmt::unwrap;
@@ -13,6 +14,7 @@ use rtic::{app, Mutex};
 use rtic_monotonics::systick::{ExtU64, Systick};
 use rtic_sync::{channel::Receiver, make_channel};
 use smoltcp::iface::{SocketHandle, SocketStorage};
+use spaeter_core::AnchorId;
 use statime::{filters::BasicFilter, PtpInstance};
 use stm32_eth::{dma::PacketId, EthPins, Parts, PartsIn};
 use stm32f7xx_hal::{
@@ -21,6 +23,7 @@ use stm32f7xx_hal::{
     rng::RngExt,
 };
 
+use spaeter_core::Timestamped;
 use spaeter_firmware::{
     adc_capture::{AdcCapture, AdcCaptureBuffer},
     ethernet::{
@@ -29,6 +32,7 @@ use spaeter_firmware::{
     },
     port::{self, setup_statime, TimerName},
     ptp_clock::{stm_time_to_statime, PtpClock},
+    timing::{SampleIndex, TimerObservations, TimerValue},
 };
 
 use defmt::Debug2Format;
@@ -41,22 +45,34 @@ defmt::timestamp!("{=u64:iso8601ms}", {
     time.seconds() as u64 * 1_000 + (time.subseconds().nanos() / 1000000) as u64
 });
 
+// TODO: Make config?
+const ANCHOR_ID: AnchorId = AnchorId(0);
+
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
     use super::*;
 
     static ADC_CONVERSION_DATA: StaticCell<AdcCaptureBuffer> = StaticCell::new();
+    static TIM2_OVERFLOWS: AtomicU32 = AtomicU32::new(0);
 
     #[shared]
     struct Shared {
         net: NetworkStack,
         ptp_port: port::Port,
         tx_waker: WakerRegistration,
-        adc_capture: AdcCapture,
+        observations: TimerObservations,
     }
 
     #[local]
-    struct Local {}
+    struct Local {
+        audio_chunk_sender: rtic_sync::channel::Sender<
+            'static,
+            (SampleIndex, [f32; signal_detector::CHUNK_SIZE]),
+            64,
+        >,
+        adc_capture: AdcCapture,
+        ptp_clock: &'static PtpClock,
+    }
 
     #[init(local = [
         dma_resources: DmaResources = DmaResources::new(),
@@ -64,7 +80,7 @@ mod app {
         udp_resources: [UdpSocketResources; 2] = [UdpSocketResources::new(); 2],
         tcp_resources: TcpSocketResources = TcpSocketResources::new(),
         dma: core::cell::OnceCell<stm32_eth::dma::EthernetDMA<'static,'static> >  = core::cell::OnceCell::new(),
-        mq_buffer: [u8; 256] = [0; 256],
+        mq_buffer: [u8; 4096] = [0; 4096],
     ])]
     fn init(cx: init::Context) -> (Shared, Local) {
         let p = cx.device;
@@ -146,12 +162,14 @@ mod app {
         let adc_conversion_data = ADC_CONVERSION_DATA.init_with(|| core::array::from_fn(|_| 0));
         let adc_capture = AdcCapture::init(
             adc_conversion_data,
+            p.ADC_COMMON,
             p.ADC1,
             p.TIM2,
             p.DMA2,
             &mut rcc.apb1,
             &mut rcc.apb2,
             &mut rcc.ahb1,
+            &clocks,
         );
         defmt::println!("👻");
 
@@ -236,11 +254,13 @@ mod app {
             ptp_port,
         );
 
+        type AudioChunk = (SampleIndex, [f32; signal_detector::CHUNK_SIZE]);
+        let (audio_chunk_sender, audio_chunk_receiver) = make_channel!(AudioChunk, 64);
+
         // Start tasks
         {
             // Blink LED
-            blinky::spawn(led_pin, ptp_clock)
-                .unwrap_or_else(|_| defmt::panic!("Failed to start blinky"));
+            blinky::spawn(led_pin).unwrap_or_else(|_| defmt::panic!("Failed to start blinky"));
 
             // Listen on sockets
             event_listen::spawn().unwrap_or_else(|_| defmt::panic!("Failed to start event_listen"));
@@ -264,6 +284,10 @@ mod app {
 
             // Poll mqtt client
             poll_mqtt::spawn().unwrap_or_else(|_| defmt::panic!("Failed to start poll_mqtt"));
+
+            // Receive audio from the DMA and process it
+            audio_chunk_processor::spawn(audio_chunk_receiver)
+                .unwrap_or_else(|_| defmt::panic!("Failed to start audio_chunk_processor"));
         }
 
         (
@@ -271,9 +295,13 @@ mod app {
                 net,
                 ptp_port,
                 tx_waker: WakerRegistration::new(),
-                adc_capture,
+                observations: TimerObservations::from_capture(&adc_capture),
             },
-            Local {},
+            Local {
+                adc_capture,
+                audio_chunk_sender,
+                ptp_clock,
+            },
         )
     }
 
@@ -417,25 +445,8 @@ mod app {
     /// Blinks the blue LED on the Nucleo board to indicate that the program is
     /// running
     #[task(priority = 0)]
-    async fn blinky(
-        _cx: blinky::Context,
-        mut led: Pin<'B', 7, Output>,
-        ptp_clock: &'static PtpClock,
-    ) {
-        const PTP_SYNC_INTERVAL: Timestamp = Timestamp::new(
-            false,
-            0,
-            match Subseconds::new_from_nanos(1000 * 1000 * 500) {
-                Some(s) => s,
-                None => unreachable!(),
-            },
-        );
-
+    async fn blinky(_cx: blinky::Context, mut led: Pin<'B', 7, Output>) {
         loop {
-            let now = EthernetPTP::now();
-            let ptp_target_time = now + PTP_SYNC_INTERVAL;
-            ptp_clock.access(|clock| clock.configure_target_time_interrupt(ptp_target_time));
-
             Systick::delay(500u64.millis()).await;
             led.set_high();
             Systick::delay(500u64.millis()).await;
@@ -515,32 +526,33 @@ mod app {
                 })
                 .unwrap_or(50);
 
-            // TODO this could wait longer if we were notified about any other calls to
-            // poll, would be an optimization for later to go to sleep longer
             Systick::delay(delay_millis.millis()).await;
         }
     }
 
     #[task(shared = [net], priority = 0)]
     async fn poll_mqtt(mut cx: poll_mqtt::Context) {
+        let mut connected = true;
         loop {
             let did_recv = cx.shared.net.lock(|net| {
-                defmt::info!(
-                    "Polling MQTT. Connected: {}",
-                    net.mqtt
-                        .client()
-                        .is_connected()
-                        .then_some("✅")
-                        .unwrap_or("❌")
-                );
-                match net.mqtt.poll(|_, topic, payload, properties| {
+                if connected != net.mqtt.client().is_connected() {
+                    connected = net.mqtt.client().is_connected();
+
+                    defmt::info!(
+                        "Polling MQTT. Connected: {}",
+                        connected.then_some("✅").unwrap_or("❌")
+                    );
+                }
+
+                let poll_result = net.mqtt.poll(|_, topic, payload, properties| {
                     defmt::info!(
                         "Received MQTT message. Topic: {}, payload: '{}', properties: {:?}",
                         topic,
                         core::str::from_utf8(payload).unwrap_or("<GIBBERISH>"),
                         Debug2Format(&properties)
                     );
-                }) {
+                });
+                match poll_result {
                     Ok(res) => res.is_some(),
                     Err(e) => {
                         defmt::error!("MQTT Poll error: {:?}", Debug2Format(&e));
@@ -549,29 +561,129 @@ mod app {
                 }
             });
             if !did_recv {
-                Systick::delay(500u64.millis()).await;
+                Systick::delay(5u64.millis()).await;
             }
         }
     }
 
-    #[task(binds = DMA2_STREAM0, shared = [ adc_capture ], priority = 1)]
-    fn on_dma2_stream0(mut cx: on_dma2_stream0::Context) {
-        cx.shared
-            .adc_capture
-            .lock(|capture| capture.dma_interrupt_handler());
+    #[task(binds = DMA2_STREAM0, local = [adc_capture, audio_chunk_sender], priority = 2)]
+    fn on_dma2_stream0(cx: on_dma2_stream0::Context) {
+        cx.local.adc_capture.dma_interrupt_handler();
 
-        // TODO: Handle new data
+        let (mut index, (sample_data, _)) = cx.local.adc_capture.data_buffer();
+
+        let samples_to_take =
+            (sample_data.len() / signal_detector::CHUNK_SIZE) * signal_detector::CHUNK_SIZE;
+
+        for chunk in sample_data.chunks_exact(signal_detector::CHUNK_SIZE) {
+            let mut float_chunk = [0.0; signal_detector::CHUNK_SIZE];
+
+            for (sample, float_sample) in chunk.iter().zip(float_chunk.iter_mut()) {
+                // Convert the 12-bit samples to floats of -1.0..1.0
+                *float_sample = ((*sample as f32) / 2048.0) - 1.0;
+            }
+
+            match cx.local.audio_chunk_sender.try_send((index, float_chunk)) {
+                Ok(()) => {}
+                Err(rtic_sync::channel::TrySendError::Full(_)) => {
+                    defmt::trace!("Audio chunk channel is full");
+                }
+                Err(_) => {
+                    defmt::panic!("Could not send audio chunk");
+                }
+            }
+            index.0 += signal_detector::CHUNK_SIZE as u64;
+        }
+
+        cx.local.adc_capture.release_data(samples_to_take);
     }
 
-    #[task(binds = TIM2, priority = 1)]
-    fn on_tim2_update(_cx: on_tim2_update::Context) {
-        let tim2 = unsafe { &*pac::TIM2::ptr() };
-        let sr = tim2.sr.read();
-        tim2.sr.write(|w| unsafe { w.bits(!sr.bits()) });
+    #[task(
+        local = [
+            signal_detector: signal_detector::SignalDetector = signal_detector::SignalDetector::new(54545.454)
+        ],
+        shared = [net, observations],
+        priority = 0,
+    )]
+    async fn audio_chunk_processor(
+        mut cx: audio_chunk_processor::Context,
+        mut audio_chunk_receiver: Receiver<
+            'static,
+            (SampleIndex, [f32; signal_detector::CHUNK_SIZE]),
+            64,
+        >,
+    ) {
+        loop {
+            let (index, chunk) = unwrap!(audio_chunk_receiver.recv().await.ok());
 
-        let cc1 = tim2.ccr1.read().ccr().bits();
-        defmt::println!("TIM2 CC1: {}", cc1);
-        defmt::println!("TIM2 {=u32:032b}!", sr.bits());
+            let Some(sample_time) = cx
+                .shared
+                .observations
+                .lock(|observations| observations.sample_time(index))
+            else {
+                continue;
+            };
+
+            let sample_timestamp = spaeter_core::Timestamp::new(
+                sample_time.nanos().to_num(),
+                sample_time.subsec_nanos(),
+            );
+            let peaks = cx.local.signal_detector.feed(&chunk);
+
+            let publish_topic = spaeter_core::topics::signal_peak_topic(Some(ANCHOR_ID));
+
+            for peak in peaks {
+                loop {
+                    let message = minimq::Publication::new(Timestamped {
+                        timestamp: sample_timestamp,
+                        value: peak,
+                    })
+                    .topic(&publish_topic)
+                    .finish()
+                    .unwrap();
+
+                    match cx.shared.net.lock(|net| net.mqtt.client().publish(message)) {
+                        Ok(()) => {
+                            break;
+                        }
+                        Err(e) => match e {
+                            minimq::PubError::Error(minimq::Error::NotReady) => {
+                                Systick::delay(1u64.millis()).await;
+                            }
+                            e => {
+                                defmt::warn!(
+                                    "Could not publish signal peak: {}",
+                                    defmt::Debug2Format(&e)
+                                );
+                                break;
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+    #[task(binds = TIM2, priority = 3)]
+    fn on_tim2_update(_cx: on_tim2_update::Context) {
+        // Safety: we only read and clear bits in the status register. This register is only used in this ISR.
+        let tim2 = unsafe { &*pac::TIM2::ptr() };
+        let status_register = &tim2.sr;
+
+        let status = status_register.read();
+
+        // Clear events by writing a zero bit to all handled events
+        status_register.write(|w| unsafe { w.bits(!status.bits()) });
+
+        // Update interrupt flag. For TIM2 this is set on over-/underflow.
+        if status.uif().is_update_pending() {
+            TIM2_OVERFLOWS.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        }
+
+        // Capture channel 1 event. This is caused by a PTP alarm
+        if status.cc1if().bit_is_set() {
+            // Handled in Ethernet Interrupt
+        }
     }
 
     #[task(binds = ADC, priority = 1)]
@@ -588,8 +700,10 @@ mod app {
     }
 
     /// Handle the interrupt of the ethernet peripheral
-    #[task(binds = ETH, shared = [net, tx_waker], priority = 2)]
+    #[task(binds = ETH, shared = [net, tx_waker, observations], priority = 2, local = [ptp_clock, ptp_target_time: Timestamp = Timestamp::new_raw(0)])]
     fn eth_interrupt(mut cx: eth_interrupt::Context) {
+        const INTERVAL: Timestamp = Timestamp::new(false, 1, Subseconds::ZERO);
+
         let reason = stm32_eth::eth_interrupt_handler();
 
         // Receiving a tx event wakes the task waiting for tx timestamps
@@ -597,8 +711,31 @@ mod app {
             cx.shared.tx_waker.lock(|tx_waker| tx_waker.wake());
         }
 
+        let ptp_target_time: &mut Timestamp = cx.local.ptp_target_time;
         if reason.time_passed {
-            defmt::info!("Timestamp trigger !!@#!@#");
+            // Safety: CCR1 is a read-only register, so we can safely read it from anywhere
+            let tim2_count = unsafe { (*pac::TIM2::ptr()).ccr1.read().ccr().bits() };
+            let tim2_time = TimerValue(
+                ((TIM2_OVERFLOWS.load(core::sync::atomic::Ordering::SeqCst) as u64) << 32)
+                    | tim2_count as u64,
+            );
+
+            cx.shared.observations.lock(|observations| {
+                observations.push(tim2_time, stm_time_to_statime(*ptp_target_time))
+            });
+        }
+
+        // The alarm has never been set
+        let never_set = *ptp_target_time == Timestamp::new_raw(0);
+        // The clock jumped backwards
+        let alarm_too_far_away = (*ptp_target_time - EthernetPTP::now()).raw() > INTERVAL.raw();
+
+        // Set a new alarm
+        if reason.time_passed || never_set || alarm_too_far_away {
+            *ptp_target_time = EthernetPTP::now() + INTERVAL;
+            cx.local
+                .ptp_clock
+                .access(|clock| clock.configure_target_time_interrupt(*ptp_target_time));
         }
 
         // Let smoltcp handle any new packets

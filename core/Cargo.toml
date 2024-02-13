@@ -12,8 +12,10 @@ serde = { version = "1.0", default-features = false, features = ["derive"] }
 signal-detector = { path = "../signal-detector" }
 glam = { version = "0.24.2", default-features = false, features = ["serde"] }
 toml = { version = "0.8.6", optional = true }
+minimq = { git = "https://github.com/tweedegolf/minimq.git" }
 
 [features]
 default = ["std", "config"]
 std = ["glam/std"]
+libm = ["glam/libm"]
 config = ["dep:toml"]

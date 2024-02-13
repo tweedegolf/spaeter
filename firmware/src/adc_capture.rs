@@ -1,8 +1,9 @@
 mod ring_buffer;
 
+use fugit::HertzU32;
 use hal::{
     pac,
-    rcc::{self, Enable, Reset, APB2},
+    rcc::{self, BusClock, BusTimerClock, Clocks, Enable, Reset, AHB1, APB1, APB2},
 };
 use stm32f7xx_hal as hal;
 
@@ -15,42 +16,57 @@ const CAPTURE_LEN: usize = AdcCapture::CONVS_PER_CHUNK * AdcCapture::BUF_NUM_CHU
 
 pub type AdcCaptureBuffer = [u16; CAPTURE_LEN];
 
+#[derive(Debug, Clone, Copy, defmt::Format)]
 enum StreamMemoryBank {
     Bank0,
     Bank1,
 }
 
 pub struct AdcCapture {
+    adc_common: pac::ADC_COMMON,
     adc1: pac::ADC1,
     tim2: pac::TIM2,
     dma2: pac::DMA2,
     buffer: DoubleBufferedRingBuffer,
     next_done: StreamMemoryBank,
+    pub(crate) adc_clk: HertzU32,
+    pub(crate) tim2_clk: HertzU32,
 }
 
 impl AdcCapture {
     pub const CONVS_PER_CHUNK: usize = 1024 * 8;
     pub const BUF_NUM_CHUNKS: usize = 4;
+
+    #[allow(clippy::too_many_arguments)]
     pub fn init(
         buffer: &'static mut AdcCaptureBuffer,
+        adc_common: pac::ADC_COMMON,
         adc1: pac::ADC1,
         tim2: pac::TIM2,
         dma2: pac::DMA2,
-        apb1: &mut rcc::APB1,
-        apb2: &mut rcc::APB2,
-        ahb1: &mut rcc::AHB1,
+        apb1: &mut APB1,
+        apb2: &mut APB2,
+        ahb1: &mut AHB1,
+        clocks: &Clocks,
     ) -> Self {
         let mut this = Self {
+            adc_common,
             adc1,
             tim2,
             dma2,
             buffer: DoubleBufferedRingBuffer::new(buffer),
             next_done: StreamMemoryBank::Bank0,
+            adc_clk: HertzU32::Hz(0),
+            tim2_clk: HertzU32::Hz(0),
         };
 
         this.init_dma2(ahb1);
-        this.init_adc1(apb2);
-        this.init_tim2(apb1);
+        this.init_adc1(apb2, clocks);
+        this.init_tim2(apb1, clocks);
+
+        // Inits should also have initialized clock rates
+        assert_ne!(this.adc_clk, HertzU32::Hz(0));
+        assert_ne!(this.tim2_clk, HertzU32::Hz(0));
 
         this
     }
@@ -135,7 +151,7 @@ impl AdcCapture {
     /// Configure ADC1 to 12-bits resolution in
     /// single conversion mode and to be triggered externally from TIM2 TRGO
     /// and read out using DMA
-    fn init_adc1(&mut self, apb2: &mut APB2) {
+    fn init_adc1(&mut self, apb2: &mut APB2, clocks: &Clocks) {
         let adc1 = &self.adc1;
         <pac::ADC1 as Enable>::enable(apb2);
         // Power down ADC1
@@ -164,12 +180,17 @@ impl AdcCapture {
         // Use PA3 as input
         adc1.sqr3.modify(|_, w| unsafe { w.sq1().bits(3) });
 
+        adc1.smpr2.write(|w| w.smp0().cycles480());
+        self.adc_common.ccr.modify(|_, w| w.adcpre().div4());
+
         // Power up ADC1
         adc1.cr2.modify(|_, w| w.adon().enabled());
+
+        self.adc_clk = APB2::clock(clocks) / 4;
     }
 
     /// Setup TIM2 to trigger ADC1 using TRGO on update event generation
-    fn init_tim2(&mut self, apb1: &mut rcc::APB1) {
+    fn init_tim2(&mut self, apb1: &mut APB1, clocks: &Clocks) {
         let tim2 = &self.tim2;
         <pac::TIM2 as Enable>::enable(apb1);
         // Set Master mode trigger on timer enable, which will enable ADC1 as well
@@ -198,6 +219,8 @@ impl AdcCapture {
 
         // Enable CC1
         tim2.ccer.modify(|_, w| w.cc1e().set_bit());
+
+        self.tim2_clk = APB1::timer_clock(clocks);
     }
 
     pub fn dma_interrupt_handler(&mut self) {
@@ -210,7 +233,6 @@ impl AdcCapture {
 
         // Fetch status
         let stream0 = &self.dma2.st[0];
-        let current_transfer = stream0.cr.read().ct();
 
         // Check if we hit an error
         if lisr.teif0().is_error() || lisr.dmeif0().is_error() || lisr.feif0().is_error() {
@@ -232,10 +254,9 @@ impl AdcCapture {
 
         // ADC transfer is done
         if lisr.tcif0().is_complete() {
-            let memory_reg = match (&self.next_done, current_transfer.is_memory0()) {
-                (StreamMemoryBank::Bank0, true) => stream0.m0ar.as_ptr(),
-                (StreamMemoryBank::Bank1, false) => stream0.m1ar.as_ptr(),
-                _ => panic!("DMA finished wrong buffer!"),
+            let memory_reg = match self.next_done {
+                StreamMemoryBank::Bank0 => stream0.m0ar.as_ptr(),
+                StreamMemoryBank::Bank1 => stream0.m1ar.as_ptr(),
             };
 
             let next_buf = self
@@ -248,7 +269,10 @@ impl AdcCapture {
             unsafe { memory_reg.write_volatile(next_buf) };
 
             self.buffer.dma_done(old);
-            self.next_done = StreamMemoryBank::Bank1
+            self.next_done = match self.next_done {
+                StreamMemoryBank::Bank0 => StreamMemoryBank::Bank1,
+                StreamMemoryBank::Bank1 => StreamMemoryBank::Bank0,
+            };
         }
     }
 

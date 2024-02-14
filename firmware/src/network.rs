@@ -1,5 +1,6 @@
 use core::task::Poll;
 
+use crate::statime_wrapper::PtpClock;
 use defmt::unwrap;
 use futures::future::poll_fn;
 use ieee802_3_miim::{
@@ -21,8 +22,6 @@ use stm32_eth::{
     ptp::Timestamp,
 };
 use stm32f7xx_hal::signature::Uid;
-
-use crate::ptp_clock::PtpClock;
 
 pub struct DmaResources {
     pub rx_ring: [RxRingEntry; 2],
@@ -75,7 +74,7 @@ impl TcpSocketResources {
 pub type Nal = smoltcp_nal::NetworkStack<
     'static,
     &'static mut EthernetDMA<'static, 'static>,
-    &'static crate::ptp_clock::PtpClock,
+    &'static PtpClock,
 >;
 
 pub type MiniMq = Minimq<'static, Nal, &'static PtpClock, IpBroker>;

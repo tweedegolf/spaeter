@@ -1,3 +1,7 @@
+mod clock;
+
+use crate::network::NetworkStack;
+pub use clock::{stm_time_to_statime, PtpClock};
 use defmt::unwrap;
 use rtic::Mutex;
 use rtic_sync::channel::Sender;
@@ -19,8 +23,6 @@ use statime::{
 };
 use stm32_eth::dma::PacketId;
 use stm32f7xx_hal::rng::Rng;
-
-use crate::{ethernet::NetworkStack, ptp_clock::PtpClock};
 
 type StmPort<State> =
     statime::port::Port<State, AcceptAnyMaster, Rng, &'static PtpClock, BasicFilter>;

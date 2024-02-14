@@ -1,5 +1,5 @@
+use super::timing::SampleIndex;
 use super::{AdcCapture, AdcCaptureBuffer, CAPTURE_LEN};
-use crate::timing::SampleIndex;
 use core::ops::{Deref, DerefMut};
 use core::slice;
 

@@ -1,16 +1,14 @@
 mod ring_buffer;
+pub mod timing;
 
 use fugit::HertzU32;
 use hal::{
     pac,
     rcc::{self, BusClock, BusTimerClock, Clocks, Enable, Reset, AHB1, APB1, APB2},
 };
-use stm32f7xx_hal as hal;
-
-use super::timing::SampleIndex;
 use ring_buffer::{DmaGrant, DoubleBufferedRingBuffer};
-
-pub type Dma2Stream = pac::dma2::ST;
+use stm32f7xx_hal as hal;
+pub use timing::{SampleIndex, TimerObservations, TimerValue};
 
 const CAPTURE_LEN: usize = AdcCapture::CONVS_PER_CHUNK * AdcCapture::BUF_NUM_CHUNKS;
 

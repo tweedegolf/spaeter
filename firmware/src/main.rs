@@ -25,14 +25,12 @@ use stm32f7xx_hal::{
 
 use spaeter_core::Timestamped;
 use spaeter_firmware::{
-    adc_capture::{AdcCapture, AdcCaptureBuffer},
-    ethernet::{
+    adc_capture::{AdcCapture, AdcCaptureBuffer, SampleIndex, TimerObservations, TimerValue},
+    network::{
         self, generate_mac_address, recv_slice, DmaResources, NetworkStack, TcpSocketResources,
         UdpSocketResources,
     },
-    port::{self, setup_statime, TimerName},
-    ptp_clock::{stm_time_to_statime, PtpClock},
-    timing::{SampleIndex, TimerObservations, TimerValue},
+    statime_wrapper::{self, setup_statime, stm_time_to_statime, PtpClock, TimerName},
 };
 
 use defmt::Debug2Format;
@@ -58,7 +56,7 @@ mod app {
     #[shared]
     struct Shared {
         net: NetworkStack,
-        ptp_port: port::Port,
+        ptp_port: statime_wrapper::Port,
         tx_waker: WakerRegistration,
         observations: TimerObservations,
     }
@@ -204,24 +202,24 @@ mod app {
         ptp.set_pps_freq(4);
 
         // Setup PHY
-        ethernet::setup_phy(mac);
+        network::setup_phy(mac);
 
         // Setup smoltcp as our network stack
         let mac_address = generate_mac_address();
-        let (interface, mut sockets) = ethernet::setup_smoltcp(cx.local.sockets, dma, mac_address);
+        let (interface, mut sockets) = network::setup_smoltcp(cx.local.sockets, dma, mac_address);
 
         // Create sockets
         let [tc_res, g_res] = cx.local.udp_resources;
 
-        let event_socket = ethernet::setup_udp_socket(&mut sockets, tc_res, 319);
-        let general_socket = ethernet::setup_udp_socket(&mut sockets, g_res, 320);
+        let event_socket = network::setup_udp_socket(&mut sockets, tc_res, 319);
+        let general_socket = network::setup_udp_socket(&mut sockets, g_res, 320);
 
         // Setup DHCP. Smoltcp_nal should handle it when polled
         // let dhcp_socket = crate::ethernet::setup_dhcp_socket(&mut sockets);
 
         // Setup TCP socket for MQTT
         let mqtt_res = cx.local.tcp_resources;
-        let mqtt_tcp_socket = ethernet::setup_tcp_socket(&mut sockets, mqtt_res);
+        let mqtt_tcp_socket = network::setup_tcp_socket(&mut sockets, mqtt_res);
 
         // Setup statime
         let rng = p.RNG.init();
@@ -246,7 +244,7 @@ mod app {
         let (packet_id_sender, packet_id_receiver) = make_channel!(PacketIdMsg, 16);
 
         // Setup context for event handling around the `ptp_port`
-        let ptp_port = port::Port::new(
+        let ptp_port = statime_wrapper::Port::new(
             timer_sender,
             packet_id_sender,
             event_socket,
@@ -481,7 +479,7 @@ mod app {
     async fn listen_and_handle<const IS_EVENT: bool>(
         net: &mut impl Mutex<T = NetworkStack>,
         socket: SocketHandle,
-        port: &mut impl Mutex<T = port::Port>,
+        port: &mut impl Mutex<T = statime_wrapper::Port>,
     ) {
         // Get a local buffer to store the received packet
         // This is needed because we want to send and receive on the same socket at the

@@ -18,5 +18,5 @@ pub mod network;
 
 /// This module wrappes functionality used for [`statime`].
 ///
-/// This part comes direstly from the statime STM32 example.
+/// This part comes directly from the [`statime` STM32 example](https://github.com/pendulum-project/statime/tree/main/statime-stm32).
 pub mod statime_wrapper;

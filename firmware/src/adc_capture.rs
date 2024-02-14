@@ -12,6 +12,7 @@ pub use timing::{SampleIndex, TimerObservations, TimerValue};
 
 const CAPTURE_LEN: usize = AdcCapture::CONVS_PER_CHUNK * AdcCapture::BUF_NUM_CHUNKS;
 
+/// A fixed sized buffer that is used as backing storage of the ring buffer
 pub type AdcCaptureBuffer = [u16; CAPTURE_LEN];
 
 #[derive(Debug, Clone, Copy, defmt::Format)]
@@ -20,6 +21,9 @@ enum StreamMemoryBank {
     Bank1,
 }
 
+/// A wrapper around all resources that are needed to capture data from the ADC to a ring buffer
+///
+/// It handles all hardware configurations, interrupts, and data ownership.
 pub struct AdcCapture {
     adc_common: pac::ADC_COMMON,
     adc1: pac::ADC1,
@@ -32,9 +36,48 @@ pub struct AdcCapture {
 }
 
 impl AdcCapture {
+    /// Number of conversions the DMA will store before switching to a new buffer
     pub const CONVS_PER_CHUNK: usize = 1024 * 8;
+
+    /// Number of chunks that make up the ring buffer
     pub const BUF_NUM_CHUNKS: usize = 4;
 
+    /// Initialize all hardware used
+    ///
+    /// This connects up the peripherals in a chain. When TIM2 starts counting it causes ADC1 to
+    /// start conversions. When an ADC conversion is done the data is fetched by the DMA. The ADC
+    /// keeps performing conversions and TIM2 keeps counting, allowing correlation between ADC
+    /// sample and timer counts.
+    ///
+    /// The configurations happen in the following order:
+    ///
+    /// # Initialize DMA2 channel 0
+    /// Configure DMA2 Stream 0 to read 16-bit conversions from ADC1
+    /// and write them into the internal buffer in double-buffer mode.
+    ///
+    /// Double-buffer mode means that the DMA holds two pointers into our buffer. One that is
+    /// currently being written to, and another that is switched to once the first is done.
+    /// This allows us to take our time with feeding the DMA a new slice to write to. For more
+    /// information see STM32F767ZI reference manual chapter 8.3.10.
+    ///
+    /// This enables the DMA2 interrupt for transfer complete or any errors.
+    ///
+    /// # Initialize ADC1
+    /// Configure ADC1 to 12-bits resolution in continuous conversion mode and to be triggered
+    /// externally from TIM2 TRGO, and read out using DMA.
+    ///
+    /// Triggering the ADC from TIM2 ensures that both started on the same clock cycle. This can
+    /// then be used to calculate at which TIM2 count a specific sample was captured.
+    ///
+    /// This **has to be** setup before TIM2, otherwise TIM2 will already run before the
+    /// ADC started.
+    ///
+    /// # Initialize TIM2
+    /// Setup TIM2 to trigger ADC1 via TRGO on start. Let the timer run from 0..=u32::MAX at full
+    /// speed, causing an **interrupt** on overflow. Connect the PTP alarm signal through to capture
+    /// channel 1 on rising edges, also causing an **interrupt** on capture.
+    ///
+    /// Add the end TIM2 is started, which also starts ADC1.
     #[allow(clippy::too_many_arguments)]
     pub fn init(
         buffer: &'static mut AdcCaptureBuffer,
@@ -69,9 +112,7 @@ impl AdcCapture {
         this
     }
 
-    /// Configure DMA2 Stream 0 to read 16-bit conversions from ADC1
-    /// and write them into ADC_CONVERSION_DATA
-    /// in double-buffer mode
+    /// See Self::init for docs
     fn init_dma2(&mut self, ahb1: &mut rcc::AHB1) {
         let dma2_stream0 = &self.dma2.st[0];
         <pac::DMA2 as Enable>::enable(ahb1);
@@ -146,9 +187,7 @@ impl AdcCapture {
         dma2_stream0.cr.modify(|_, w| w.en().enabled());
     }
 
-    /// Configure ADC1 to 12-bits resolution in
-    /// single conversion mode and to be triggered externally from TIM2 TRGO
-    /// and read out using DMA
+    /// See init for docs
     fn init_adc1(&mut self, apb2: &mut APB2, clocks: &Clocks) {
         let adc1 = &self.adc1;
         <pac::ADC1 as Enable>::enable(apb2);
@@ -156,7 +195,7 @@ impl AdcCapture {
         adc1.cr2.modify(|_, w| w.adon().clear_bit());
         <pac::ADC1 as Reset>::reset(apb2);
 
-        // Setup ADC1 for contonuous conversion mode
+        // Setup ADC1 for continuous conversion mode
         adc1.cr2.modify(|_, w| w.cont().continuous());
         adc1.cr1
             .modify(|_, w| w.scan().clear_bit().discen().clear_bit());
@@ -171,7 +210,7 @@ impl AdcCapture {
         // Enable DMA on ADC1
         adc1.cr2.modify(|_, w| w.dma().enabled().dds().continuous());
 
-        // Enable ADC end-of-conversion interrupt
+        // Disable ADC end-of-conversion interrupt, enable overrun interrupt
         adc1.cr1
             .modify(|_, w| w.eocie().disabled().ovrie().enabled());
 
@@ -187,7 +226,7 @@ impl AdcCapture {
         self.adc_clk = APB2::clock(clocks) / 4;
     }
 
-    /// Setup TIM2 to trigger ADC1 using TRGO on update event generation
+    /// See init for docs
     fn init_tim2(&mut self, apb1: &mut APB1, clocks: &Clocks) {
         let tim2 = &self.tim2;
         <pac::TIM2 as Enable>::enable(apb1);
@@ -211,9 +250,11 @@ impl AdcCapture {
         // Enable TIM2
         tim2.cr1.modify(|_, w| w.cen().enabled());
 
+        // TODO: shouldn't we first setup everything and then enable the timer?
+        // Set CC1 to only capture on a rising edge
         tim2.ccer
             .modify(|_, w| w.cc1p().clear_bit().cc1np().clear_bit());
-        tim2.cr2.modify(|_, w| w.ti1s().normal());
+        tim2.cr2.modify(|_, w| w.ti1s().normal()); // TODO: is this really needed? if so add a comment why
 
         // Enable CC1
         tim2.ccer.modify(|_, w| w.cc1e().set_bit());
@@ -221,6 +262,12 @@ impl AdcCapture {
         self.tim2_clk = APB1::timer_clock(clocks);
     }
 
+    /// Handle DMA2 interrupt
+    ///
+    /// 1. Clears all interrupt flags.
+    /// 2. Raises a panic if an error occurred.
+    /// 3. Switches out the finished buffer, getting a fresh slice from the ring buffer and
+    ///    returning the finished slice to the ring buffer for the app to consume.
     pub fn dma_interrupt_handler(&mut self) {
         // Reset interrupt flag
         let lisr = self.dma2.lisr.read();
@@ -274,10 +321,18 @@ impl AdcCapture {
         }
     }
 
+    /// Get the currently available data in the ring buffer
+    ///
+    /// This returns the index of the first sample of this data, since the start of the DMA. And
+    /// two slices with the data. If the ring buffer currently does not cross the first element the
+    /// second slice is empty.
     pub fn data_buffer(&self) -> (SampleIndex, (&[u16], &[u16])) {
         (self.buffer.first_idx(), self.buffer.app_data())
     }
 
+    /// Free data from the ring buffer
+    ///
+    /// This makes the space available again to the DMA to fill.
     pub fn release_data(&mut self, num_samples: usize) {
         self.buffer.app_done(num_samples);
     }

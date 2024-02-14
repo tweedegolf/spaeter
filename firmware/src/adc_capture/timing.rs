@@ -1,3 +1,5 @@
+//! Helper to correlate counts of TIM2 (and in turn ADC samples) to PTP time
+
 use crate::adc_capture::AdcCapture;
 use core::ops::Div;
 use fixed::types::I96F32;
@@ -5,9 +7,11 @@ use fugit::HertzU32;
 use libm::{ceil, pow, sqrt};
 use statime::time::{Duration, Time};
 
+/// Index of a sample since the ADC started
 #[derive(Copy, Clone, Debug, defmt::Format, Eq, PartialEq)]
 pub struct SampleIndex(pub u64);
 
+/// Count of TIM2, expanded to 64 bits respecting overflows
 #[derive(Copy, Clone, Debug, defmt::Format, Eq, PartialEq, Ord, PartialOrd)]
 pub struct TimerValue(pub u64);
 
@@ -19,8 +23,10 @@ impl Div<HertzU32> for TimerValue {
     }
 }
 
+/// A count of TIM2 that happened at a specific PTP time point
 pub type Observation = (TimerValue, Time);
 
+/// A collection of observations, that allows to correlate ADC samples to timestamps.
 pub struct TimerObservations {
     obs: heapless::Deque<Observation, { Self::LEN }>,
     tim2_clk: HertzU32,
@@ -35,10 +41,14 @@ impl TimerObservations {
     // assumes the sample is taken exactly at the end
     const ADCCLK_SAMPLING_TIME: u64 = 480;
 
+    /// Initialize by reading clock rates from an AdcCapture
     pub fn from_capture(adc_capture: &AdcCapture) -> Self {
         Self::new(adc_capture.tim2_clk, adc_capture.adc_clk)
     }
 
+    /// Create a new collection
+    ///
+    /// This panics if the clock rate of TIM2 is not a multiple of the clock rate of ADC1.
     pub fn new(tim2_clk: HertzU32, adc_clk: HertzU32) -> Self {
         assert_eq!(tim2_clk.to_Hz() % adc_clk.to_Hz(), 0);
         Self {
@@ -48,6 +58,7 @@ impl TimerObservations {
         }
     }
 
+    /// Add an observation
     pub fn push(&mut self, timer: TimerValue, timestamp: statime::time::Time) {
         if let Some(&(last_timer, last_timestamp)) = self.obs.back() {
             assert!(
@@ -80,6 +91,7 @@ impl TimerObservations {
         TimerValue(sampling_start + sample_offset)
     }
 
+    /// Return the calculated frequency TIM2 is running at
     pub fn avg_timer_rate(&self) -> Option<HertzU32> {
         if self.obs.len() < 2 {
             return None;
@@ -100,6 +112,7 @@ impl TimerObservations {
         HertzU32::Hz(rate.to_num())
     }
 
+    /// Return the estimated std deviation of avg_timer_rate
     pub fn rate_std_dev(&self) -> Option<HertzU32> {
         let avg = self.avg_timer_rate()?.to_Hz() as f64;
 
@@ -117,6 +130,9 @@ impl TimerObservations {
         Some(HertzU32::Hz(ceil(sqrt(squared_error)) as _))
     }
 
+    /// Return the estimated time point when TIM2 started counting
+    ///
+    /// If you don't require extreme precision use timer_start_fast_and_inaccurate
     pub fn timer_start(&self) -> Option<Time> {
         let avg_rate = self.avg_timer_rate()?;
 
@@ -133,6 +149,9 @@ impl TimerObservations {
         Some(Time::from_nanos(avg_start as u64))
     }
 
+    /// Return the estimated time point when TIM2 started counting
+    ///
+    /// This performs the same calculation as timer_start but using fewer bits of precision.
     pub fn timer_start_fast_and_inaccurate(&self) -> Option<Time> {
         let obs = self.obs.back()?;
         let duration_since_start = obs.0 / self.avg_timer_rate()?;
@@ -145,6 +164,7 @@ impl TimerObservations {
         Some(self.timer_start()? + time_since_start)
     }
 
+    /// Estimate the std deviation of timer_start
     pub fn time_std_dev(&self) -> Option<Duration> {
         if self.obs.len() < 2 {
             return None;
@@ -167,15 +187,18 @@ impl TimerObservations {
         Some(Duration::from_seconds(error))
     }
 
+    /// Calculate the time an ADC sample was captured
     pub fn sample_time(&self, idx: SampleIndex) -> Option<Time> {
         let timer_value = self.sample_idx_to_timer_value(idx);
         self.to_timestamp(timer_value)
     }
 
+    /// Clear all stored observations
     pub fn clear(&mut self) {
         self.obs.clear()
     }
 
+    /// True if enough observations were captured
     pub fn is_ready(&self) -> bool {
         self.obs.len() >= 2
     }

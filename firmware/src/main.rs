@@ -664,6 +664,8 @@ mod app {
 
     #[task(binds = TIM2, priority = 3)]
     fn on_tim2_update(_cx: on_tim2_update::Context) {
+        // TODO: Maybe move this into AdcCapture
+
         // Safety: we only read and clear bits in the status register. This register is only used in this ISR.
         let tim2 = unsafe { &*pac::TIM2::ptr() };
         let status_register = &tim2.sr;
@@ -685,15 +687,15 @@ mod app {
     }
 
     #[task(binds = ADC, priority = 1)]
-    fn on_adc1_conversion(_cx: on_adc1_conversion::Context) {
-        let adc1 = unsafe { &*pac::ADC1::ptr() };
-        adc1.sr
-            .modify(|_, w| w.eoc().not_complete().strt().not_started());
+    fn on_adc1_error(_cx: on_adc1_error::Context) {
+        // Safety: The SR register is only ever accessed in this ISR
+        let sr = &unsafe { &*pac::ADC1::ptr() }.sr;
+        sr.modify(|_, w| w.eoc().not_complete().strt().not_started());
 
-        let overrun = adc1.sr.read().ovr().bit_is_set();
+        let overrun = sr.read().ovr().bit_is_set();
         if overrun {
             defmt::warn!("ADC! Overrun: {}", overrun);
-            adc1.sr.modify(|_, w| w.ovr().clear_bit());
+            sr.modify(|_, w| w.ovr().clear_bit());
         }
     }
 
@@ -709,10 +711,12 @@ mod app {
             cx.shared.tx_waker.lock(|tx_waker| tx_waker.wake());
         }
 
+        // TODO: Maybe move this into a TimerObservations::handle_ptp_alarm in timing, from here...
+
         let ptp_target_time: &mut Timestamp = cx.local.ptp_target_time;
         if reason.time_passed {
             // Safety: CCR1 is a read-only register, so we can safely read it from anywhere
-            let tim2_count = unsafe { (*pac::TIM2::ptr()).ccr1.read().ccr().bits() };
+            let tim2_count = unsafe { &*pac::TIM2::ptr() }.ccr1.read().ccr().bits();
             let tim2_time = TimerValue(
                 ((TIM2_OVERFLOWS.load(core::sync::atomic::Ordering::SeqCst) as u64) << 32)
                     | tim2_count as u64,
@@ -735,6 +739,8 @@ mod app {
                 .ptp_clock
                 .access(|clock| clock.configure_target_time_interrupt(*ptp_target_time));
         }
+
+        // TODO: up to here
 
         // Let smoltcp handle any new packets
         cx.shared.net.lock(|net| {

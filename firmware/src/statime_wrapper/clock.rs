@@ -1,8 +1,8 @@
-use core::cell::RefCell;
-
 use az::{Cast, SaturatingCast};
+use core::cell::RefCell;
 use critical_section::Mutex;
-use embedded_time::{rate::Fraction, Instant};
+use embedded_time::duration::Fraction;
+use embedded_time::Instant;
 use fixed::types::{I33F31, U96F32};
 use stm32_eth::ptp::{EthernetPTP, Timestamp};
 

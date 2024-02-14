@@ -25,14 +25,12 @@ use stm32f7xx_hal::{
 
 use spaeter_core::Timestamped;
 use spaeter_firmware::{
-    adc_capture::{AdcCapture, AdcCaptureBuffer},
-    ethernet::{
+    adc_capture::{AdcCapture, AdcCaptureBuffer, SampleIndex, TimerObservations, TimerValue},
+    network::{
         self, generate_mac_address, recv_slice, DmaResources, NetworkStack, TcpSocketResources,
         UdpSocketResources,
     },
-    port::{self, setup_statime, TimerName},
-    ptp_clock::{stm_time_to_statime, PtpClock},
-    timing::{SampleIndex, TimerObservations, TimerValue},
+    statime_wrapper::{self, setup_statime, stm_time_to_statime, PtpClock, TimerName},
 };
 
 use defmt::Debug2Format;
@@ -58,7 +56,7 @@ mod app {
     #[shared]
     struct Shared {
         net: NetworkStack,
-        ptp_port: port::Port,
+        ptp_port: statime_wrapper::Port,
         tx_waker: WakerRegistration,
         observations: TimerObservations,
     }
@@ -204,24 +202,24 @@ mod app {
         ptp.set_pps_freq(4);
 
         // Setup PHY
-        ethernet::setup_phy(mac);
+        network::setup_phy(mac);
 
         // Setup smoltcp as our network stack
         let mac_address = generate_mac_address();
-        let (interface, mut sockets) = ethernet::setup_smoltcp(cx.local.sockets, dma, mac_address);
+        let (interface, mut sockets) = network::setup_smoltcp(cx.local.sockets, dma, mac_address);
 
         // Create sockets
         let [tc_res, g_res] = cx.local.udp_resources;
 
-        let event_socket = ethernet::setup_udp_socket(&mut sockets, tc_res, 319);
-        let general_socket = ethernet::setup_udp_socket(&mut sockets, g_res, 320);
+        let event_socket = network::setup_udp_socket(&mut sockets, tc_res, 319);
+        let general_socket = network::setup_udp_socket(&mut sockets, g_res, 320);
 
         // Setup DHCP. Smoltcp_nal should handle it when polled
         // let dhcp_socket = crate::ethernet::setup_dhcp_socket(&mut sockets);
 
         // Setup TCP socket for MQTT
         let mqtt_res = cx.local.tcp_resources;
-        let mqtt_tcp_socket = ethernet::setup_tcp_socket(&mut sockets, mqtt_res);
+        let mqtt_tcp_socket = network::setup_tcp_socket(&mut sockets, mqtt_res);
 
         // Setup statime
         let rng = p.RNG.init();
@@ -246,7 +244,7 @@ mod app {
         let (packet_id_sender, packet_id_receiver) = make_channel!(PacketIdMsg, 16);
 
         // Setup context for event handling around the `ptp_port`
-        let ptp_port = port::Port::new(
+        let ptp_port = statime_wrapper::Port::new(
             timer_sender,
             packet_id_sender,
             event_socket,
@@ -481,7 +479,7 @@ mod app {
     async fn listen_and_handle<const IS_EVENT: bool>(
         net: &mut impl Mutex<T = NetworkStack>,
         socket: SocketHandle,
-        port: &mut impl Mutex<T = port::Port>,
+        port: &mut impl Mutex<T = statime_wrapper::Port>,
     ) {
         // Get a local buffer to store the received packet
         // This is needed because we want to send and receive on the same socket at the
@@ -666,6 +664,8 @@ mod app {
 
     #[task(binds = TIM2, priority = 3)]
     fn on_tim2_update(_cx: on_tim2_update::Context) {
+        // TODO: Maybe move this into AdcCapture
+
         // Safety: we only read and clear bits in the status register. This register is only used in this ISR.
         let tim2 = unsafe { &*pac::TIM2::ptr() };
         let status_register = &tim2.sr;
@@ -687,15 +687,15 @@ mod app {
     }
 
     #[task(binds = ADC, priority = 1)]
-    fn on_adc1_conversion(_cx: on_adc1_conversion::Context) {
-        let adc1 = unsafe { &*pac::ADC1::ptr() };
-        adc1.sr
-            .modify(|_, w| w.eoc().not_complete().strt().not_started());
+    fn on_adc1_error(_cx: on_adc1_error::Context) {
+        // Safety: The SR register is only ever accessed in this ISR
+        let sr = &unsafe { &*pac::ADC1::ptr() }.sr;
+        sr.modify(|_, w| w.eoc().not_complete().strt().not_started());
 
-        let overrun = adc1.sr.read().ovr().bit_is_set();
+        let overrun = sr.read().ovr().bit_is_set();
         if overrun {
             defmt::warn!("ADC! Overrun: {}", overrun);
-            adc1.sr.modify(|_, w| w.ovr().clear_bit());
+            sr.modify(|_, w| w.ovr().clear_bit());
         }
     }
 
@@ -711,10 +711,12 @@ mod app {
             cx.shared.tx_waker.lock(|tx_waker| tx_waker.wake());
         }
 
+        // TODO: Maybe move this into a TimerObservations::handle_ptp_alarm in timing, from here...
+
         let ptp_target_time: &mut Timestamp = cx.local.ptp_target_time;
         if reason.time_passed {
             // Safety: CCR1 is a read-only register, so we can safely read it from anywhere
-            let tim2_count = unsafe { (*pac::TIM2::ptr()).ccr1.read().ccr().bits() };
+            let tim2_count = unsafe { &*pac::TIM2::ptr() }.ccr1.read().ccr().bits();
             let tim2_time = TimerValue(
                 ((TIM2_OVERFLOWS.load(core::sync::atomic::Ordering::SeqCst) as u64) << 32)
                     | tim2_count as u64,
@@ -737,6 +739,8 @@ mod app {
                 .ptp_clock
                 .access(|clock| clock.configure_target_time_interrupt(*ptp_target_time));
         }
+
+        // TODO: up to here
 
         // Let smoltcp handle any new packets
         cx.shared.net.lock(|net| {

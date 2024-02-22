@@ -96,7 +96,7 @@ impl NetworkStack {
     ) -> Self {
         let nal_stack = smoltcp_nal::NetworkStack::new(interface, dma, sockets, ptp_clock);
 
-        let mq_broker_addr = embedded_nal::IpAddr::V4(embedded_nal::Ipv4Addr::new(10, 0, 0, 1));
+        let mq_broker_addr = embedded_nal::IpAddr::V4(embedded_nal::Ipv4Addr::new(10, 0, 0, 3));
         let mqtt: Minimq<
             '_,
             smoltcp_nal::NetworkStack<'_, &mut EthernetDMA<'_, '_>, &PtpClock>,

@@ -6,3 +6,4 @@ pub mod ethernet;
 pub mod port;
 pub mod ptp_clock;
 pub mod timing;
+pub mod mic;

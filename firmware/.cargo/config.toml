@@ -1,5 +1,5 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "probe-rs run --chip STM32F767ZITx"
+runner = "probe-rs run --chip STM32F767ZITx --catch-hardfault"
 rustflags = [
   "-C",
   "link-arg=-Tlink.x",
@@ -15,4 +15,5 @@ rustflags = [
 target = "thumbv7em-none-eabihf"
 
 [env]
-DEFMT_LOG = "info,statime_stm32=trace"
+DEFMT_LOG = "info,spaeter_firmware=trace"
+DEFMT_RTT_BUFFER_SIZE = "8192"

@@ -47,6 +47,7 @@ defmt::timestamp!("{=u64:iso8601ms}", {
 
 // TODO: Make config?
 const ANCHOR_ID: AnchorId = AnchorId(0);
+const AUDIO_CHUNK_BUS_SIZE: usize = 64;
 
 #[app(device = stm32f7xx_hal::pac, dispatchers = [CAN1_RX0])]
 mod app {
@@ -68,7 +69,7 @@ mod app {
         audio_chunk_sender: rtic_sync::channel::Sender<
             'static,
             (SampleIndex, [f32; signal_detector::CHUNK_SIZE]),
-            64,
+            AUDIO_CHUNK_BUS_SIZE,
         >,
         adc_capture: AdcCapture,
         ptp_clock: &'static PtpClock,
@@ -80,7 +81,7 @@ mod app {
         udp_resources: [UdpSocketResources; 2] = [UdpSocketResources::new(); 2],
         tcp_resources: TcpSocketResources = TcpSocketResources::new(),
         dma: core::cell::OnceCell<stm32_eth::dma::EthernetDMA<'static,'static> >  = core::cell::OnceCell::new(),
-        mq_buffer: [u8; 4096] = [0; 4096],
+        mq_buffer: [u8; 8192] = [0; 8192],
     ])]
     fn init(cx: init::Context) -> (Shared, Local) {
         let p = cx.device;
@@ -113,13 +114,13 @@ mod app {
         // log_to_defmt::setup();
 
         // Setup GPIO
-        let (led_pin, pps, eth_pins, mdio, mdc) = {
+        let (led_pin, pps, eth_pins, mdio, mdc, mut mic) = {
             let gpioa = p.GPIOA.split();
             let gpiob = p.GPIOB.split();
             let gpioc = p.GPIOC.split();
+            let gpioe = p.GPIOE.split();
             let gpiog = p.GPIOG.split();
 
-            let _adc1_in = gpioa.pa3.into_analog();
             let _tim2_it1: Pin<'A', 5, stm32f7xx_hal::gpio::Alternate<1>> =
                 gpioa.pa5.into_alternate();
 
@@ -154,24 +155,19 @@ mod app {
                 rx_d1,
             };
 
-            (led_pin, pps, eth_pins, mdio, mdc)
+            let mic = spaeter_firmware::mic::MicInterface::new(
+                gpioa.pa3.into_analog(),
+                gpioa.pa4.into_push_pull_output(),
+                gpioa.pa6.into_dynamic(),
+                gpioe.pe2.into_dynamic(),
+            )
+            .enable();
+
+            (led_pin, pps, eth_pins, mdio, mdc, mic)
         };
 
-        defmt::println!("Going to do scary stuff now");
-
-        let adc_conversion_data = ADC_CONVERSION_DATA.init_with(|| core::array::from_fn(|_| 0));
-        let adc_capture = AdcCapture::init(
-            adc_conversion_data,
-            p.ADC_COMMON,
-            p.ADC1,
-            p.TIM2,
-            p.DMA2,
-            &mut rcc.apb1,
-            &mut rcc.apb2,
-            &mut rcc.ahb1,
-            &clocks,
-        );
-        defmt::println!("👻");
+        mic.set_gain(spaeter_firmware::mic::Gain::G60dB);
+        mic.set_ar(spaeter_firmware::mic::AttackRelease::Fast);
 
         // Setup Ethernet
         let Parts { dma, mac, mut ptp } = {
@@ -238,6 +234,22 @@ mod app {
             // dhcp_socket,
         );
 
+        defmt::println!("Going to do scary stuff now");
+
+        let adc_conversion_data = ADC_CONVERSION_DATA.init_with(|| AdcCaptureBuffer::new());
+        let adc_capture = AdcCapture::init(
+            adc_conversion_data,
+            p.ADC_COMMON,
+            p.ADC1,
+            p.TIM2,
+            p.DMA2,
+            &mut rcc.apb1,
+            &mut rcc.apb2,
+            &mut rcc.ahb1,
+            &clocks,
+        );
+        defmt::println!("👻");
+
         // Setup message channels
         type TimerMsg = (TimerName, core::time::Duration);
         let (timer_sender, timer_receiver) = make_channel!(TimerMsg, 4);
@@ -255,7 +267,8 @@ mod app {
         );
 
         type AudioChunk = (SampleIndex, [f32; signal_detector::CHUNK_SIZE]);
-        let (audio_chunk_sender, audio_chunk_receiver) = make_channel!(AudioChunk, 64);
+        let (audio_chunk_sender, audio_chunk_receiver) =
+            make_channel!(AudioChunk, AUDIO_CHUNK_BUS_SIZE);
 
         // Start tasks
         {
@@ -610,7 +623,7 @@ mod app {
         mut audio_chunk_receiver: Receiver<
             'static,
             (SampleIndex, [f32; signal_detector::CHUNK_SIZE]),
-            64,
+            AUDIO_CHUNK_BUS_SIZE,
         >,
     ) {
         loop {
@@ -623,6 +636,10 @@ mod app {
             else {
                 continue;
             };
+
+            if index.0 % 100 == 0 {
+                defmt::warn!("{}", chunk);
+            }
 
             let sample_timestamp = spaeter_core::Timestamp::new(
                 sample_time.nanos().to_num(),

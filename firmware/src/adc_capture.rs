@@ -14,7 +14,28 @@ pub type Dma2Stream = pac::dma2::ST;
 
 const CAPTURE_LEN: usize = AdcCapture::CONVS_PER_CHUNK * AdcCapture::BUF_NUM_CHUNKS;
 
-pub type AdcCaptureBuffer = [u16; CAPTURE_LEN];
+#[repr(align(4))]
+pub struct AdcCaptureBuffer([u16; CAPTURE_LEN]);
+
+impl AdcCaptureBuffer {
+    pub const fn new() -> Self {
+        Self([0; CAPTURE_LEN])
+    }
+}
+
+impl core::ops::DerefMut for AdcCaptureBuffer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl core::ops::Deref for AdcCaptureBuffer {
+    type Target = [u16; CAPTURE_LEN];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[derive(Debug, Clone, Copy, defmt::Format)]
 enum StreamMemoryBank {
@@ -34,7 +55,7 @@ pub struct AdcCapture {
 }
 
 impl AdcCapture {
-    pub const CONVS_PER_CHUNK: usize = 1024 * 8;
+    pub const CONVS_PER_CHUNK: usize = 1024 * 16;
     pub const BUF_NUM_CHUNKS: usize = 4;
 
     #[allow(clippy::too_many_arguments)]
@@ -236,7 +257,12 @@ impl AdcCapture {
 
         // Check if we hit an error
         if lisr.teif0().is_error() || lisr.dmeif0().is_error() || lisr.feif0().is_error() {
-            panic!("DMA error on stream 0");
+            panic!(
+                "DMA error on stream 0. TEIF: {}, DMEIF: {}, FEIF: {}",
+                lisr.teif0().is_error(),
+                lisr.dmeif0().is_error(),
+                lisr.feif0().is_error()
+            );
         }
         if lisr.teif1().is_error()
             || lisr.dmeif1().is_error()

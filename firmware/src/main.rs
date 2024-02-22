@@ -626,8 +626,20 @@ mod app {
             AUDIO_CHUNK_BUS_SIZE,
         >,
     ) {
+        let mut long_average = 0.0;
+
         loop {
-            let (index, chunk) = unwrap!(audio_chunk_receiver.recv().await.ok());
+            let (index, mut chunk) = unwrap!(audio_chunk_receiver.recv().await.ok());
+
+            for s in chunk {
+                long_average = long_average * 0.999 + s * 0.001;
+            }
+
+            if index.0 % 100 == 0 {
+                defmt::info!("{}", long_average);
+            }
+
+            chunk.iter_mut().for_each(|s| *s -= long_average);
 
             let Some(sample_time) = cx
                 .shared
@@ -637,15 +649,15 @@ mod app {
                 continue;
             };
 
-            if index.0 % 100 == 0 {
-                defmt::warn!("{}", chunk);
-            }
-
             let sample_timestamp = spaeter_core::Timestamp::new(
                 sample_time.nanos().to_num(),
                 sample_time.subsec_nanos(),
             );
-            let peaks = cx.local.signal_detector.feed(&chunk);
+            let peaks = cx.local.signal_detector.feed(&chunk, 0.0);
+
+            if index.0 % 100 == 0 {
+                defmt::info!("{}", defmt::Debug2Format(&peaks[1]));
+            }
 
             let publish_topic = spaeter_core::topics::signal_peak_topic(Some(ANCHOR_ID));
 
